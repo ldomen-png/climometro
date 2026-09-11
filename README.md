@@ -16,15 +16,13 @@ Sistema de riesgo climático-operativo para empresas en México, desarrollado po
 
 ## Capas y señales
 
-**Semáforo logístico multi-variable** por zona y por día, con atribución (la app dice *por qué* una zona está en alerta): lluvia acumulada, viento sostenido, ráfagas, calor extremo y condición del cielo (código WMO). Umbrales centralizados en `CLIMA_THRESHOLDS`.
-
-Capas y señales:
+Umbrales centralizados en `CLIMA_THRESHOLDS` (tres tramos por variable) y escala en `NIVELES`.
 
 - **Malla nacional de lluvia** — 660 celdas a 1°, raster interpolado en GPU (Mapbox canvas source).
 - **Partículas de viento** — campo u/v advectado en tiempo real (hasta 1,400 partículas).
 - **Corredores con pronóstico propio** — los 30 corredores federales se evalúan punto a punto (196 waypoints); el nivel toma el peor tramo. Se dibujan con **geometría real de carretera** (OSRM/OSM precomputado en `data/corredores.json`).
 - **Ciclones tropicales** — cono de incertidumbre, trayectoria y puntos de pronóstico del NHC/NOAA (ArcGIS REST con CORS), sondeando los slots AT1–AT5 y EP1–EP5.
-- **Sismos** — M4.5+ de los últimos 7 días vía USGS (GeoJSON con CORS).
+- **Sismos** — M4.5+ de las últimas 48 h vía USGS (GeoJSON con CORS).
 - **Crecidas fluviales** — descarga GloFAS (Open-Meteo Flood API); señal cuando el pronóstico supera 2× la mediana de los últimos 31 días.
 - **Puntos críticos de inundación** — 953 sitios con inundaciones recurrentes (CONAGUA-CENAPRED 2018), con cuerpo de agua y localidad; alimentan el detalle de zonas y sitios ("N puntos a <15 km"). `data/puntos_inundacion.json`.
 - **Agua observada por satélite** — ocurrencia de agua superficial 1984–2021 (JRC Global Surface Water, tiles públicos), visible a zoom ≥6.
@@ -38,7 +36,7 @@ Capas y señales:
 | Open-Meteo Forecast | Pronóstico ZMs, corredores y malla | `api.open-meteo.com/v1/forecast` |
 | Open-Meteo Flood (GloFAS) | Señal de crecida fluvial | `flood-api.open-meteo.com/v1/flood` |
 | NHC / NOAA | Ciclones tropicales (cono, track, puntos) | `mapservices.weather.noaa.gov/tropical/.../NHC_tropical_weather/MapServer` |
-| USGS | Sismos M4.5+ | `earthquake.usgs.gov/fdsnws/event/1/query` |
+| USGS | Sismos M4.5+ (48 h) | `earthquake.usgs.gov/fdsnws/event/1/query` |
 | CENAPRED (estático) | Peligro por inundación municipal | Atlas Nacional de Riesgos, capa 52 → `data/inundacion.json` |
 | NOAA HURDAT2 (estático) | Trayectorias históricas de ciclones | `nhc.noaa.gov/data/hurdat/` → `data/huracanes.json` |
 
@@ -70,10 +68,10 @@ python3 -m http.server 8000
 
 ## Motor integral (prototipo) — `motor/`
 
-Motor de fusión multi-señal que produce el **Nivel Operativo Integral** por objetivo (zona o sitio) en vocabulario de Protección Civil (VERDE/AMARILLA/NARANJA/ROJA), con evidencia y acción:
+Motor de fusión multi-señal que produce el **Nivel Operativo Integral** por objetivo (zona o sitio) en la escala de Protección Civil (sin alerta / verde / amarillo / naranja / rojo), con evidencia y acción:
 
 ```bash
-python3 motor/corte.py                           # EL PRODUCTO: mensaje del corte (2×/día)
+python3 motor/corte.py                           # EL PRODUCTO: mensaje del corte (3×/día)
 python3 motor/corte.py --simulacro huracan       # ensayo de ficha extraordinaria
 python3 motor/ejercicio.py --hoy                 # snapshot técnico con evidencia completa
 python3 motor/ejercicio.py --simulacro observado # + respuesta institucional (piso)
