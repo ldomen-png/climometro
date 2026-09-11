@@ -378,7 +378,8 @@ html,body{height:100%;width:100%;overflow:hidden;font-family:'Inter',sans-serif;
 .reg-flags{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:2px 0 12px;}
 .reg-flag{border-radius:6px;padding:7px 3px 6px;text-align:center;border:1.5px solid;}
 .rf-name{font-size:9px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;opacity:0.9;}
-.rf-lvl{font-size:9.5px;font-weight:600;margin-top:2px;}
+.rf-lvl{font-size:9.5px;font-weight:700;margin-top:2px;letter-spacing:0.03em;}
+.rf-verb{font-size:8.5px;color:var(--text-dim);margin-top:1px;}
 
 /* DAY CHIPS (navegación de días en modo clima) */
 .day-chips{display:flex;gap:4px;width:100%;}
@@ -975,6 +976,13 @@ canvas.wind-raster{
           <div class="section" id="capas-clima" style="display:none">
             <div class="field-row">
               <div>
+                <div class="field-label">Geocercas de afectación</div>
+                <div class="field-sub">Área alrededor de zonas en amarillo o peor · 25–60 km según nivel</div>
+              </div>
+              <div class="toggle on" data-tg="geocercas" role="button" tabindex="0"></div>
+            </div>
+            <div class="field-row">
+              <div>
                 <div class="field-label">Lluvia (malla nacional)</div>
                 <div class="field-sub">Precipitación acumulada del día · Open-Meteo</div>
               </div>
@@ -997,7 +1005,7 @@ canvas.wind-raster{
             <div class="field-row">
               <div>
                 <div class="field-label">Sismos recientes</div>
-                <div class="field-sub">M4.5+ últimos 7 días · USGS</div>
+                <div class="field-sub">M4.5+ últimas 48 h · USGS</div>
               </div>
               <div class="toggle on" data-tg="quakes" role="button" tabindex="0"></div>
             </div>
@@ -1092,8 +1100,9 @@ canvas.wind-raster{
         <div class="cl-row" id="cl-risk-row" style="margin-top:7px;align-items:center;display:none;">
           <span class="cl-label">Riesgo</span>
           <div style="display:flex;gap:10px;flex-wrap:wrap;width:170px;">
+            <span class="cl-wind-key" id="cl-key-geocerca"><i style="background:#ff9530"></i>&nbsp;Geocerca de afectación</span>
             <span class="cl-wind-key" id="cl-key-cyclone" style="display:none"><span style="color:#c81f10">◌</span>&nbsp;Cono ciclón (NHC)</span>
-            <span class="cl-wind-key" id="cl-key-quake" style="display:none"><span style="color:#7a4fd0">◉</span>&nbsp;Sismo M4.5+ (USGS)</span>
+            <span class="cl-wind-key" id="cl-key-quake" style="display:none"><span style="color:#7a4fd0">◉</span>&nbsp;Sismo M4.5+ 48 h</span>
           </div>
         </div>
         <div class="cl-row" id="cl-hist-row" style="margin-top:7px;align-items:center;display:none;">
@@ -1141,6 +1150,7 @@ canvas.wind-raster{
           <div id="clmwhy" style="font-size:10px;color:var(--text-dim);margin-top:4px;line-height:1.4"></div>
           <div id="clmflood" style="display:none;margin-top:6px;padding:6px 8px;border-radius:4px;background:rgba(58,168,255,0.10);border:1px solid rgba(58,168,255,0.30);font-size:10px;color:#7cc0ff;line-height:1.4"></div>
           <div id="clmsiat"></div>
+          <div id="clmgeo" style="display:none;margin-top:6px;font-size:10px;line-height:1.4"></div>
         </div>
         <div class="dops" id="clima-hist-block" style="display:none">
           <div class="dops-t">Exposición histórica de la zona</div>
@@ -1244,12 +1254,17 @@ function buildHeadline(weekIdx, compact){
   const labelEmpty = isClima ? 'Sin clima adverso esperado.' : 'Sin alertas en el país esta semana.';
   const labelPeriodWord = isClima ? 'día' : 'semana';
   const act = ZONAS.filter(z=>z.semanas[weekIdx]>0);
-  const red = ZONAS.filter(z=>z.semanas[weekIdx]===2).length;
-  const yel = ZONAS.filter(z=>z.semanas[weekIdx]===1).length;
+  const red = ZONAS.filter(z=>z.semanas[weekIdx]>=3).length;
+  const yel = ZONAS.filter(z=>z.semanas[weekIdx]===2).length;
+  // Conteo por nivel de la escala PC (solo clima; incluye ciclón por zona)
+  const porNivel = [0,0,0,0,0];
+  if(isClima) ZONAS.forEach(z => { porNivel[nivelDeZona(z)]++; });
+  const conAlerta = porNivel[1]+porNivel[2]+porNivel[3]+porNivel[4];
+  const nivelTope = porNivel[4] ? 4 : porNivel[3] ? 3 : porNivel[2] ? 2 : porNivel[1] ? 1 : 0;
   const d = computeDeltas(weekIdx);
   const affectedCorrIds = new Set();
   if(isClima && corridorClimaLevels){
-    CORRIDORS.forEach((corr, ci) => { if((corridorClimaLevels[ci][weekIdx]||0) > 0) affectedCorrIds.add(corr.id); });
+    CORRIDORS.forEach((corr, ci) => { if((corridorClimaLevels[ci][weekIdx]||0) >= 2) affectedCorrIds.add(corr.id); });
   } else {
     act.forEach(z => { CORRIDORS.forEach(corr => { if(zmCorridorDistKm(z,corr) < PROXIMITY_KM) affectedCorrIds.add(corr.id); }); });
   }
@@ -1257,11 +1272,18 @@ function buildHeadline(weekIdx, compact){
 
   if(compact){
     // Mobile float: one-line summary with strong visual hierarchy.
-    if(act.length === 0 && activeStorms.length === 0) return '<span class="hl-num green">'+(isClima?'Sin clima adverso':'Sin alertas activas')+'</span>';
+    if(isClima){
+      if(nivelTope === 0) return '<span class="hl-num green">Sin fenómenos en vigilancia</span>';
+      const m = NIVELES[nivelTope];
+      const cls = nivelTope >= 3 ? 'red' : nivelTope === 2 ? 'yellow' : 'green';
+      return '<span class="hl-num '+cls+'">'+porNivel[nivelTope]+'</span> zona'+(porNivel[nivelTope]>1?'s':'')
+        + ' en alerta <span style="color:'+m.color+';font-weight:700">'+m.flag+'</span> · '+m.verbo;
+    }
+    if(act.length === 0 && activeStorms.length === 0) return '<span class="hl-num green">Sin alertas activas</span>';
     if(act.length === 0 && activeStorms.length > 0){
       return '<span class="hl-num red">'+activeStorms.length+'</span> ciclón'+(activeStorms.length>1?'es':'')+' activo'+(activeStorms.length>1?'s':'')+' cerca de México';
     }
-    let s = '<span class="hl-num red">'+act.length+'</span> zonas '+(isClima?'con clima adverso':'activas');
+    let s = '<span class="hl-num red">'+act.length+'</span> zonas activas';
     if(weekIdx > 0){
       const parts = [];
       if(d.new.length > 0) parts.push('<span class="hl-num red">+'+d.new.length+'</span> nueva'+(d.new.length>1?'s':''));
@@ -1274,29 +1296,34 @@ function buildHeadline(weekIdx, compact){
   // Desktop / panel: structured headline with multiple lines.
   let html = '';
 
-  // PRIMARY LINE: total zones in alert
-  if(act.length === 0){
+  // PRIMARY LINE — en clima lidera el nivel más alto presente, con su acción
+  if(isClima){
+    if(nivelTope === 0){
+      html += '<div class="hl-primary"><span class="hl-num green hl-big">0</span><span class="hl-label">zonas en alerta</span></div>';
+      html += '<div class="hl-secondary green">Sin fenómenos en vigilancia.</div>';
+    } else {
+      const m = NIVELES[nivelTope];
+      const cls = nivelTope >= 3 ? 'red' : nivelTope === 2 ? 'yellow' : 'green';
+      html += '<div class="hl-primary"><span class="hl-num '+cls+' hl-big">'+porNivel[nivelTope]+'</span>'
+        + '<span class="hl-label">zona'+(porNivel[nivelTope]>1?'s':'')+' en alerta <b style="color:'+m.color+'">'+m.flag+'</b><br>'+m.verbo+'</span></div>';
+      const partes = [];
+      for(let n = 4; n >= 1; n--) if(porNivel[n] > 0 && n !== nivelTope)
+        partes.push('<span style="color:'+NIVELES[n].color+';font-weight:700">'+porNivel[n]+'</span> '+NIVELES[n].flag.toLowerCase());
+      if(partes.length) html += '<div class="hl-secondary">También: '+partes.join(' · ')+'.</div>';
+      html += '<div class="hl-secondary" style="color:rgba(255,255,255,0.65)">'+m.accion+'</div>';
+    }
+    if(affectedCorrIds.size > 0){
+      html += '<div class="hl-secondary"><span class="hl-num yellow">'+affectedCorrIds.size+'</span> corredor'+(affectedCorrIds.size>1?'es':'')+' federal'+(affectedCorrIds.size>1?'es':'')+' afectado'+(affectedCorrIds.size>1?'s':'')+'.</div>';
+    }
+  } else if(act.length === 0){
     html += '<div class="hl-primary"><span class="hl-num green hl-big">0</span><span class="hl-label">'+labelActive+'</span></div>';
     html += '<div class="hl-secondary green">'+labelEmpty+'</div>';
   } else {
     html += '<div class="hl-primary"><span class="hl-num red hl-big">'+act.length+'</span><span class="hl-label">'+labelActive+'</span></div>';
-    
-    // SECONDARY LINE: breakdown by level — mismo vocabulario que el resto de la app
-    const redWord = isClima ? 'con disrupción alta' : 'en rojo';
-    const yelWord = isClima ? 'con retrasos probables' : 'en amarillo';
     const lvlParts = [];
-    if(red > 0) lvlParts.push('<span class="hl-num red">'+red+'</span> '+redWord);
-    if(yel > 0) lvlParts.push('<span class="hl-num yellow">'+yel+'</span> '+yelWord);
-    if(lvlParts.length === 1 && (red===act.length || yel===act.length)){
-      // All same level — say it differently to avoid redundancy
-      const lvlWord = red === act.length ? redWord : yelWord;
-      const lvlCls = red === act.length ? 'red' : 'yellow';
-      html += '<div class="hl-secondary">Todas <span class="hl-'+lvlCls+'-text">'+lvlWord+'</span>.</div>';
-    } else {
-      html += '<div class="hl-secondary">'+lvlParts.join(' · ')+'.</div>';
-    }
-
-    // CORRIDORS LINE (if any)
+    if(red > 0) lvlParts.push('<span class="hl-num red">'+red+'</span> en rojo');
+    if(yel > 0) lvlParts.push('<span class="hl-num yellow">'+yel+'</span> en amarillo');
+    html += '<div class="hl-secondary">'+lvlParts.join(' · ')+'.</div>';
     if(affectedCorrIds.size > 0){
       html += '<div class="hl-secondary"><span class="hl-num yellow">'+affectedCorrIds.size+'</span> corredor'+(affectedCorrIds.size>1?'es':'')+' federal'+(affectedCorrIds.size>1?'es':'')+' afectado'+(affectedCorrIds.size>1?'s':'')+'.</div>';
     }
@@ -1350,7 +1377,7 @@ let wk = currentWeekIdx();
 let sel = null;
 // Al entrar se ve EL SEMÁFORO: lluvia y viento son capas de análisis,
 // apagadas por defecto (la malla nacional ni se descarga hasta pedirla).
-let layerVis = {hex:true, corr:true, labels:true, rain:false, cyclones:true, quakes:true, histflood:false, histtracks:false, histpuntos:false, histagua:false};
+let layerVis = {hex:true, corr:true, labels:true, geocercas:true, rain:false, cyclones:true, quakes:true, histflood:false, histtracks:false, histpuntos:false, histagua:false};
 let filterVis = {alert:true, historic:true, none:false};
 let corrTypeVis = {cuota:true, libre:true};
 let highlightedCorridors = new Set();
@@ -1385,13 +1412,41 @@ let savedProtestasDates = null;
 // Umbrales únicos de severidad — TODA la app (semáforo, tooltip, ticker,
 // corredores) deriva de esta tabla para que ningún número cuente una historia
 // distinta en dos lugares.
+// Umbrales por tramo de la escala de Protección Civil. Cada variable cruza
+// tres fronteras: VERDE (el fenómeno existe) → AMARILLO (preparación) →
+// NARANJA (coordinación). El pronóstico NO alcanza ROJO: rojo es afectación
+// observada o impacto inminente de ciclón. Vocabulario de lluvia alineado al
+// SMN: moderada ≥15, fuerte ≥30, intensa ≥70 mm/día.
 const CLIMA_THRESHOLDS = {
-  yellowRain:15, redRain:30,   // mm acumulados/día (15: <eso es lluvia normal de temporada, no alerta)
-  yellowWind:40, redWind:60,   // viento sostenido máx km/h
-  yellowGust:60, redGust:85,   // ráfaga máx km/h
-  yellowHeat:42, redHeat:46    // temperatura máx °C
+  rain: [15, 30, 70],    // mm acumulados/día
+  wind: [40, 60, 80],    // viento sostenido máx km/h
+  gust: [60, 85, 110],   // ráfaga máx km/h
+  heat: [42, 46, 48]     // temperatura máx °C
 };
-const CLIMA_SCALE = { rainNorm:40, windNorm:70 }; // mm and km/h that map to "max intensity"
+
+// ── ESCALA DE ALERTA (Protección Civil) ─────────────────────────────────
+// Evolutiva y acumulativa: cada nivel hereda las acciones del anterior. El
+// color describe el ESTADO del fenómeno (puede quedarse quieto meses, como el
+// Popocatépetl en amarillo); el aviso se dispara por transición y criticidad.
+// Verde NO significa "libre": significa que hay algo que vigilar.
+const NIVELES = [
+  { flag:'Sin alerta', verbo:'Rutina',       color:'#8fb8a4', mapa:'#8fb8a4', dim:'rgba(143,184,164,0.35)',
+    accion:'Condiciones normales. Monitoreo de rutina.' },
+  { flag:'VERDE',      verbo:'Informarse',   color:'#3ecf6e', mapa:'#3ecf6e', dim:'rgba(62,207,110,0.35)',
+    accion:'Mantenerse informado: fenómeno en desarrollo con seguimiento activo.' },
+  { flag:'AMARILLO',   verbo:'Preparación',  color:'#e4c249', mapa:'#e4c249', dim:'rgba(228,194,73,0.35)',
+    accion:'Además: revisar planes y directorios, preparar recursos y establecer comunicación con cuerpos de socorro.' },
+  { flag:'NARANJA',    verbo:'Coordinación', color:'#ff9530', mapa:'#ff9530', dim:'rgba(255,149,48,0.35)',
+    accion:'Además: sesión de comité, planeación ante impacto, reprogramar operación y resguardar personal expuesto.' },
+  { flag:'ROJO',       verbo:'Emergencia',   color:'#e03020', mapa:'#e03020', dim:'rgba(224,48,32,0.35)',
+    accion:'Además: activar refugios, evacuación y rescate; suspender operación en la zona.' }
+];
+const nivelColor = n => (NIVELES[n] || NIVELES[0]).mapa;
+const nivelFlag  = n => (NIVELES[n] || NIVELES[0]).flag;
+const nivelAccion = n => (NIVELES[n] || NIVELES[0]).accion;
+// Nivel de la escala PC para cada etapa del SIAT-CT (azul y verde del SIAT
+// comparten "informarse"; el resto mapea uno a uno).
+const SIAT_A_NIVEL = { A:1, V:1, Y:2, N:3, R:4 };
 
 // WMO weather_code → etiqueta operativa. Solo los grupos que cambian una
 // decisión logística; el resto cae al bucket genérico.
@@ -1599,18 +1654,21 @@ function climaDayRisk(rainMm, windKmh, gustKmh, tmaxC, code){
   const reasons = [];
   let level = 0;
   const bump = (lvl, txt, cat) => { if(lvl > level) level = lvl; reasons.push({ lvl, txt, cat }); };
-  if(rainMm >= T.redRain) bump(2, rainMm.toFixed(0)+' mm de lluvia', 'lluvia');
-  else if(rainMm >= T.yellowRain) bump(1, rainMm.toFixed(0)+' mm de lluvia', 'lluvia');
-  if(windKmh >= T.redWind) bump(2, 'viento '+windKmh.toFixed(0)+' km/h', 'viento');
-  else if(windKmh >= T.yellowWind) bump(1, 'viento '+windKmh.toFixed(0)+' km/h', 'viento');
-  if(gustKmh != null){
-    if(gustKmh >= T.redGust) bump(2, 'ráfagas '+gustKmh.toFixed(0)+' km/h', 'viento');
-    else if(gustKmh >= T.yellowGust) bump(1, 'ráfagas '+gustKmh.toFixed(0)+' km/h', 'viento');
-  }
-  if(tmaxC != null){
-    if(tmaxC >= T.redHeat) bump(2, 'calor extremo '+tmaxC.toFixed(0)+'°C', 'calor');
-    else if(tmaxC >= T.yellowHeat) bump(1, 'calor '+tmaxC.toFixed(0)+'°C', 'calor');
-  }
+  // Nivel por variable según el tramo cruzado (1 verde, 2 amarillo, 3 naranja).
+  const tramo = (val, fronteras) => {
+    if(val == null) return 0;
+    let n = 0;
+    for(let i = 0; i < fronteras.length; i++) if(val >= fronteras[i]) n = i + 1;
+    return n;
+  };
+  const nR = tramo(rainMm, T.rain);
+  if(nR) bump(nR, rainMm.toFixed(0)+' mm de lluvia', 'lluvia');
+  const nV = tramo(windKmh, T.wind);
+  if(nV) bump(nV, 'viento '+windKmh.toFixed(0)+' km/h', 'viento');
+  const nG = tramo(gustKmh, T.gust);
+  if(nG) bump(nG, 'ráfagas '+gustKmh.toFixed(0)+' km/h', 'viento');
+  const nT = tramo(tmaxC, T.heat);
+  if(nT) bump(nT, (nT >= 2 ? 'calor extremo ' : 'calor ')+tmaxC.toFixed(0)+'°C', 'calor');
   const w = wmoLabel(code);
   if(w && w.severe && level === 0) bump(1, w.label.toLowerCase(), 'visibilidad');
   reasons.sort((a,b) => b.lvl - a.lvl);
@@ -1621,13 +1679,13 @@ function climaDayRisk(rainMm, windKmh, gustKmh, tmaxC, code){
 // Acciones recomendadas por nivel y causa dominante. Sugerencias, no órdenes:
 // el "entonces qué hago" que convierte un pronóstico en una decisión.
 const PLAYBOOK = {
-  2: {
+  3: {
     lluvia: 'Retén o reprograma embarques hacia la zona; activa protocolo de inundación en piso y confirma rutas alternas antes de despachar.',
     viento: 'Suspende maniobras de patio con grúa/montacargas, asegura lonas y contenedores vacíos, y reevalúa la salida de cajas de alto perfil.',
     calor: 'Ajusta turnos de patio a horas tempranas, refuerza hidratación y verifica refrigeración de unidades y cadena de frío.',
     visibilidad: 'Retrasa salidas nocturnas/madrugada hasta que levante; exige convoy con distancia ampliada en tramos de montaña.'
   },
-  1: {
+  2: {
     lluvia: 'Adelanta salidas o programa ruta alterna; confirma condiciones con el transportista antes de despachar.',
     viento: 'Revisa amarres y carga de alto perfil antes de salir; monitorea ráfagas en el trayecto.',
     calor: 'Programa descansos en patio y verifica cadena de frío en unidades expuestas.',
@@ -1823,27 +1881,98 @@ const REGION_DE_ESTADO = (() => {
   Object.entries(m).forEach(([r, ests]) => ests.forEach(e => { out[e] = r; }));
   return out;
 })();
-// Bandera por región (misma escala del corte): 0 verde, 1 amarilla, 2 naranja, 3 roja
-const BANDERA_META = [
-  { n:'Sin alerta',  c:'#3ecf6e' },
-  { n:'Vigilancia',  c:'#e4c249' },
-  { n:'Actúa',       c:'#ff9530' },
-  { n:'Emergencia',  c:'#e03020' }
-];
+// Nivel de cada región: el peor de sus zonas, tomando física (tope naranja)
+// y ciclón (SIAT-CT, único que puede llegar a rojo).
+function nivelDeZona(z){
+  let n = Math.min(3, z.semanas[wk] || 0);
+  const s = siatForPoint(z.lat, z.lng);
+  if(s) n = Math.max(n, SIAT_A_NIVEL[s.code] || 0);
+  // Crecida fluvial: amarillo (preparación). No más, porque el píxel de GloFAS
+  // puede no caer sobre el río correcto — mismo tope que en el corte.
+  if(z._floodRatio) n = Math.max(n, 2);
+  return n;
+}
 function banderasPorRegion(){
   const niveles = {};
   REGIONES_OPS.forEach(r => { niveles[r] = 0; });
   ZONAS.forEach(z => {
     const reg = REGION_DE_ESTADO[z.estado] || 'Centro';
-    let n = Math.min(2, z.semanas[wk] || 0); // física: máx NARANJA
-    const s = siatForPoint(z.lat, z.lng);
-    if(s){
-      if(s.meta.rank >= 5) n = 3;
-      else if(s.meta.rank === 4) n = Math.max(n, 2);
-    }
+    const n = nivelDeZona(z);
     if(n > niveles[reg]) niveles[reg] = n;
   });
   return niveles;
+}
+
+// ── GEOCERCAS DE AFECTACIÓN ─────────────────────────────────────────────
+// Para la gente que no va por carretera sino dispersa por un territorio
+// (ejecutivos de venta, personal de campo): lo que importa no es la ruta sino
+// el ÁREA donde no conviene operar, y quién quedó dentro. Radio por nivel.
+const GEOCERCA_KM = [0, 0, 25, 40, 60];   // sin alerta, verde, amarillo, naranja, rojo
+function circuloLngLat(lat, lng, km, pasos){
+  pasos = pasos || 48;
+  const dLat = km / 111;
+  const dLng = km / (111 * Math.cos(lat * Math.PI / 180) || 1);
+  const anillo = [];
+  for(let i = 0; i <= pasos; i++){
+    const a = 2 * Math.PI * i / pasos;
+    anillo.push([lng + dLng * Math.cos(a), lat + dLat * Math.sin(a)]);
+  }
+  return [anillo];
+}
+// Zonas en amarillo o peor → una geocerca cada una.
+function geocercasActivas(){
+  const out = [];
+  ZONAS.forEach(z => {
+    const n = nivelDeZona(z);
+    if(n < 2) return;
+    out.push({ zona: z, nivel: n, km: GEOCERCA_KM[n] });
+  });
+  return out;
+}
+function geocercasFC(){
+  return {
+    type: 'FeatureCollection',
+    features: geocercasActivas().map(g => ({
+      type: 'Feature',
+      properties: { zm: g.zona.zm, nivel: g.nivel, km: g.km, flag: nivelFlag(g.nivel) },
+      geometry: { type: 'Polygon', coordinates: circuloLngLat(g.zona.lat, g.zona.lng, g.km) }
+    }))
+  };
+}
+// ¿Qué activos del usuario quedaron dentro de alguna geocerca?
+function sitiosEnGeocerca(){
+  const activas = geocercasActivas();
+  const dentro = [];
+  sites.forEach(s => {
+    let peor = null;
+    activas.forEach(g => {
+      const d = Math.hypot((g.zona.lng - s.lng) * 111 * Math.cos(s.lat * Math.PI/180),
+                           (g.zona.lat - s.lat) * 111);
+      if(d <= g.km && (!peor || g.nivel > peor.nivel)) peor = { ...g, dist: d };
+    });
+    if(peor) dentro.push({ sitio: s, geocerca: peor });
+  });
+  return dentro;
+}
+function nivelSitio(i, s){
+  const r = siteRisk(i, wk);
+  let n = r ? Math.min(3, r.level) : 0;
+  const st = siatForPoint(s.lat, s.lng);
+  if(st) n = Math.max(n, SIAT_A_NIVEL[st.code] || 0);
+  const g = geocercaDeSitio(s);
+  if(g) n = Math.max(n, g.nivel);
+  return n;
+}
+function geocercaDeSitio(s){
+  const hit = sitiosEnGeocerca().find(x => x.sitio.id === s.id);
+  return hit ? hit.geocerca : null;
+}
+function refreshGeocercas(){
+  if(!mapReady) return;
+  const src = map.getSource('geocercas');
+  if(src) src.setData(geocercasFC());
+  const on = mode === 'clima' && layerVis.geocercas;
+  ['geocercas-fill','geocercas-line'].forEach(id => setLayerVis(id, on));
 }
 
 // ── SIAT-CT ESTIMADO ────────────────────────────────────────────────────
@@ -1932,10 +2061,10 @@ function siatChipHTML(siat){
 }
 
 async function loadQuakes(){
-  // M4.5+ últimos 7 días dentro del bbox nacional — el umbral operativo:
-  // por debajo de eso no se interrumpe logística.
+  // M4.5+ de las últimas 48 h dentro del bbox nacional. Siete días saturaban
+  // el mapa con eventos que ya no son noticia operativa.
   const end = new Date();
-  const start = new Date(end.getTime() - 7*24*3600*1000);
+  const start = new Date(end.getTime() - 48*3600*1000);
   const iso = d => d.toISOString().slice(0,10);
   const url = 'https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson'
     +'&starttime='+iso(start)+'&minlatitude=14&maxlatitude=33&minlongitude=-118&maxlongitude=-86&minmagnitude=4.5&orderby=time';
@@ -2305,10 +2434,9 @@ function sitesFC(){
   return {
     type: 'FeatureCollection',
     features: sites.map((s, i) => {
-      const r = siteRisk(i, wk);
       return {
         type: 'Feature',
-        properties: { id: s.id, name: s.name, level: r ? r.level : 0, idx: i },
+        properties: { id: s.id, name: s.name, level: nivelSitio(i, s), idx: i },
         geometry: { type: 'Point', coordinates: [s.lng, s.lat] }
       };
     })
@@ -2376,12 +2504,12 @@ function renderSitesPanel(){
   const DOW = ['DOM','LUN','MAR','MIÉ','JUE','VIE','SÁB'];
   el.innerHTML = sites.map((s, i) => {
     const today = siteRisk(i, wk);
-    const lvl = today ? today.level : 0;
+    const lvl = nivelSitio(i, s);
     const [lbl, col] = lvlMeta(lvl);
     const days = SEMANAS.map((d, di) => {
       const r = siteRisk(i, di);
       const v = r ? r.level : 0;
-      const c = v === 2 ? '#e03020' : v === 1 ? '#e4c249' : 'rgba(62,207,110,0.35)';
+      const c = v > 0 ? nivelColor(v) : NIVELES[0].dim;
       const why = (r && r.reasons.length) ? ' · ' + r.reasons.join(', ') : '';
       return '<div class="site-day'+(di===wk?' on':'')+'" style="background:'+c+'" onclick="jmpW('+di+')" title="'+fmtD(d)+why+'"></div>';
     }).join('');
@@ -2404,6 +2532,14 @@ function renderSitesPanel(){
       +   (action ? '<br><span style="color:var(--aleph-yellow)">Sugerencia:</span> '+action : '')
       +   (histParts.length ? '<br>Exposición: '+histParts.join(' · ') : '')
       + '</div>'
+      + (() => {
+          const g = geocercaDeSitio(s);
+          if(!g) return '';
+          const c = nivelColor(g.nivel);
+          return '<div class="site-alert" style="background:'+c+'1a;border:1px solid '+c+'59;color:'+c+'">'
+            + '⬤ Dentro de la geocerca de afectación de '+escHTML(g.zona.zm)+' ('+nivelFlag(g.nivel)+', radio '+g.km+' km, a '+g.dist.toFixed(0)+' km del centro). '
+            + 'Suspender actividad en calle en esta área mientras dure la alerta.</div>';
+        })()
       + siatChipHTML(siatForPoint(s.lat, s.lng))
       + (cone ? '<div class="site-alert cone">🌀 Dentro del cono de pronóstico de '+escHTML(cone.name)+' (aviso #'+cone.advisory+' NHC). Activa protocolo de ciclón.</div>' : '')
       + '</div>';
@@ -2420,8 +2556,11 @@ function refreshRiskLayers(){
   if(cyKey) cyKey.style.display = (showCy && hasStorms) ? 'inline-flex' : 'none';
   const qkKey = document.getElementById('cl-key-quake');
   if(qkKey) qkKey.style.display = (showQk && hasQuakes) ? 'inline-flex' : 'none';
+  const geoKey = document.getElementById('cl-key-geocerca');
+  const hayGeo = mode === 'clima' && layerVis.geocercas && geocercasActivas().length > 0;
+  if(geoKey) geoKey.style.display = hayGeo ? 'inline-flex' : 'none';
   const rowEl = document.getElementById('cl-risk-row');
-  if(rowEl) rowEl.style.display = ((showCy && hasStorms) || (showQk && hasQuakes)) ? 'flex' : 'none';
+  if(rowEl) rowEl.style.display = ((showCy && hasStorms) || (showQk && hasQuakes) || hayGeo) ? 'flex' : 'none';
   if(!mapReady) return;
   const coneSrc = map.getSource('hurr-cone');   if(coneSrc)  coneSrc.setData(hurricanesFC('cone'));
   const trackSrc = map.getSource('hurr-track'); if(trackSrc) trackSrc.setData(hurricanesFC('track'));
@@ -2430,11 +2569,6 @@ function refreshRiskLayers(){
   ['hurr-cone-fill','hurr-cone-line','hurr-track-line','hurr-points-circle','hurr-points-label'].forEach(id => setLayerVis(id, showCy));
   ['quakes-circle','quakes-label'].forEach(id => setLayerVis(id, showQk));
   refreshHistLayers();
-}
-function climaIntensityAt(rainMm, windKmh){
-  const rainNorm = Math.min(1, (rainMm||0) / CLIMA_SCALE.rainNorm);
-  const windNorm = Math.min(1, (windKmh||0) / CLIMA_SCALE.windNorm);
-  return { rainNorm, windNorm, intensity: Math.max(rainNorm, windNorm), useWind: windNorm > rainNorm && (windKmh||0) > 30 };
 }
 function updateClimaFreshness(){
   const parts = [];
@@ -2559,8 +2693,10 @@ function setLayerVis(id, on){
 function applyZonaCirclePaint(){
   if(!mapReady || !map.getLayer('zonas-circle')) return;
   if(mode === 'clima'){
-    map.setPaintProperty('zonas-circle', 'circle-color', ['match', ['get','level'], 2, '#e03020', 1, '#e4c249', '#8fb8a4']);
-    map.setPaintProperty('zonas-circle', 'circle-radius', ['match', ['get','level'], 2, 8, 1, 6, 3.5]);
+    map.setPaintProperty('zonas-circle', 'circle-color',
+      ['match', ['get','level'], 4, NIVELES[4].mapa, 3, NIVELES[3].mapa, 2, NIVELES[2].mapa, 1, NIVELES[1].mapa, NIVELES[0].mapa]);
+    map.setPaintProperty('zonas-circle', 'circle-radius',
+      ['match', ['get','level'], 4, 9, 3, 8, 2, 6, 1, 4.5, 3.5]);
     map.setPaintProperty('zonas-circle', 'circle-opacity', 0.95);
     map.setPaintProperty('zonas-circle', 'circle-stroke-color', 'rgba(255,255,255,0.95)');
     map.setPaintProperty('zonas-circle', 'circle-stroke-width', 1.6);
@@ -2982,10 +3118,10 @@ function buildClimaTickerItems(items){
       const tmaxArr = fc.daily.temperature_2m_max || [];
       let maxRain = 0, maxRainIdx = -1;
       rain.forEach((r, di) => { if(r > maxRain){ maxRain = r; maxRainIdx = di; }});
-      if(maxRain >= T.redRain){
+      if(maxRain >= T.rain[1]){
         items.push({
           cve: z.cve,
-          tone: maxRain >= T.redRain * 1.5 ? 'red' : 'blue',
+          tone: maxRain >= T.rain[2] ? 'red' : 'blue',
           icon: '⛆',
           loc: z.zm.toUpperCase(),
           detail: maxRain.toFixed(0)+'mm lluvia esperada '+dayPhrase(maxRainIdx)
@@ -2993,7 +3129,7 @@ function buildClimaTickerItems(items){
       }
       let maxGust = 0, maxGustIdx = -1;
       gust.forEach((w, di) => { if(w > maxGust){ maxGust = w; maxGustIdx = di; }});
-      if(maxGust >= T.redGust){
+      if(maxGust >= T.gust[1]){
         items.push({
           cve: z.cve,
           tone: 'orange',
@@ -3004,7 +3140,7 @@ function buildClimaTickerItems(items){
       }
       let maxT = -99, maxTIdx = -1;
       tmaxArr.forEach((t, di) => { if(t != null && t > maxT){ maxT = t; maxTIdx = di; }});
-      if(maxT >= T.redHeat){
+      if(maxT >= T.heat[1]){
         items.push({
           cve: z.cve,
           tone: 'orange',
@@ -3245,7 +3381,7 @@ function renderAlertas(){
       + '<b style="color:#7fdca4">● Alertas activas</b> para <b>'+escHTML(alertasCfg.telefono)+'</b>'
       + (alertasCfg.entregado ? '' : ' <span style="color:var(--text-dim)">(registro local — se sincroniza con la central)</span>')
       + '<br><span style="color:rgba(255,255,255,0.7)">Regiones: '+alertasCfg.regiones.map(escHTML).join(', ')+'</span>'
-      + '<br><span style="color:var(--text-dim)">Recibirás los cortes de 07:00 y 16:00, y fichas inmediatas solo en naranja o roja.</span>'
+      + '<br><span style="color:var(--text-dim)">Recibirás los cortes de 09:00, 14:00 y 16:00, y fichas inmediatas solo en naranja o rojo.</span>'
       + '</div>'
       + '<div style="display:flex;gap:8px;margin-top:8px">'
       + '<button type="button" id="alertas-edit" class="cl-toggle" style="flex:1;padding:6px">Modificar</button>'
@@ -3262,7 +3398,7 @@ function renderAlertas(){
   const prev = arguments[0] || null;
   const marcadas = prev ? prev.regiones : REGIONES_ALERTA.slice();
   el.innerHTML =
-    '<div style="font-size:11px;color:rgba(255,255,255,0.6);line-height:1.5;margin-bottom:8px">Dos cortes al día (07:00 y 16:00) con la situación de tus regiones, y ficha inmediata solo cuando algo cruza a <b style="color:#ff9530">naranja</b> o <b style="color:var(--red-text)">roja</b>. Nada más.</div>'
+    '<div style="font-size:11px;color:rgba(255,255,255,0.6);line-height:1.5;margin-bottom:8px">Tres cortes al día (09:00, 14:00 y 16:00) con la situación de tus regiones, y ficha inmediata solo cuando algo cruza a <b style="color:#ff9530">naranja</b> o <b style="color:var(--red-text)">rojo</b>. Con alerta activa la cadencia sube.</div>'
     + '<input id="alertas-nombre" type="text" placeholder="Tu nombre" value="'+(prev ? escHTML(prev.nombre || '') : '')+'" '
     + 'style="width:100%;padding:9px 11px;background:var(--bg-input);border:1px solid var(--border-strong);border-radius:6px;color:#fff;font-family:\'Inter\',sans-serif;font-size:13px;margin-bottom:6px" aria-label="Nombre">'
     + '<input id="alertas-tel" type="tel" inputmode="tel" placeholder="Número WhatsApp · 10 dígitos (MX) o +…" value="'+(prev ? escHTML(prev.telefono) : '')+'" '
@@ -3309,9 +3445,10 @@ function buildParteOperativo(){
   sites.forEach((s, i) => {
     const r = siteRisk(i, wk);
     if(!r) return;
-    const ico = r.level === 2 ? '🔴' : r.level === 1 ? '🟡' : '🟢';
-    let line = ico + ' ' + s.name + ' — ' + (r.reasons.length ? r.reasons.join(', ') : 'sin afectación prevista');
-    const act = playbookFor(r.level, r.cat);
+    const nef = nivelSitio(i, s);
+    const ico = ['🟢','🟢','🟡','🟠','🔴'][Math.max(0, Math.min(4, nef))];
+    let line = ico + ' ' + s.name + ' — ' + (r.reasons.length ? r.reasons.join(', ') : 'sin afectación propia prevista');
+    const act = playbookFor(Math.min(3, nef), r.cat);
     if(act) line += ' → ' + act;
     const cone = siteInCone(s);
     if(cone) line += ' · 🌀 dentro del cono de ' + cone.name;
@@ -3319,16 +3456,22 @@ function buildParteOperativo(){
     if(st && st.meta.rank >= 3) line += ' · SIAT-CT est. ' + st.meta.name;
     lines.push(line);
   });
+  const enGeo = sitiosEnGeocerca();
+  if(enGeo.length){
+    lines.push('⬤ Dentro de geocercas de afectación: '
+      + enGeo.map(x => x.sitio.name + ' (' + nivelFlag(x.geocerca.nivel).toLowerCase() + ' por ' + x.geocerca.zona.zm + ')').join(' · ')
+      + ' → suspender actividad en calle en esas áreas.');
+  }
   const siatS = siatSummary();
   if(siatS && siatS.best.meta.rank >= 3){
     lines.push('⚠ SIAT-CT estimado: ' + siatS.best.meta.name + ' en ' + siatS.count + ' zona' + (siatS.count>1?'s':'') + ' (' + siatS.best.storm.name + ') → ' + siatS.best.meta.action);
   }
-  const redZones = ZONAS.filter(z => z.semanas[wk] === 2);
+  const redZones = ZONAS.filter(z => nivelDeZona(z) >= 3);
   redZones.slice(0, 8).forEach(z => lines.push('🔴 ' + z.zm + ' — ' + (((z._climaReasons || [])[wk]) || []).join(', ')));
   if(redZones.length > 8) lines.push('… y ' + (redZones.length - 8) + ' zonas más en disrupción alta');
   if(corridorClimaLevels){
     CORRIDORS.forEach((c, ci) => {
-      if(corridorClimaLevels[ci][wk] === 2){
+      if(corridorClimaLevels[ci][wk] >= 3){
         const st = corridorClimaStats[ci][wk];
         lines.push('🔴 Corredor ' + c.id + ' (' + c.name + ') — ' + st.rain.toFixed(0) + ' mm máx en ruta' + (st.gust >= 30 ? ', ráfagas ' + st.gust.toFixed(0) + ' km/h' : ''));
       }
@@ -3451,6 +3594,7 @@ document.querySelectorAll('[data-tg]').forEach(t => {
       return;
     }
     if(layer === 'histagua'){ refreshHistLayers(); return; }
+    if(layer === 'geocercas'){ refreshGeocercas(); return; }
     if(layer === 'rain'){
       if(layerVis.rain) ensureGrid();
       else if(mapReady) setLayerVis('rain-raster', false);
@@ -3515,9 +3659,9 @@ function hexagonLngLat(lat,lng,r){
 }
 function lvlMeta(n){
   if(mode === 'clima'){
-    if(n===2)return['DISRUPCIÓN ALTA','#e03020','rgba(224,48,32,0.18)'];
-    if(n===1)return['RETRASOS PROBABLES','#e4c249','rgba(228,194,73,0.18)'];
-    return['SIN AFECTACIÓN PREVISTA','#3ecf6e','rgba(62,207,110,0.12)'];
+    const m = NIVELES[Math.max(0, Math.min(4, n))] || NIVELES[0];
+    const etiqueta = n > 0 ? ('ALERTA '+m.flag+' · '+m.verbo) : 'SIN ALERTA';
+    return [etiqueta, m.color, m.color+'2e'];
   }
   if(n===2)return['NIVEL 2 — ROJO','#e03020','rgba(224,48,32,0.18)'];
   if(n===1)return['NIVEL 1 — AMARILLO','#e4c249','rgba(228,194,73,0.18)'];
@@ -3585,16 +3729,11 @@ function zonasFC(){
   return {
     type: 'FeatureCollection',
     features: ZONAS.map(z => {
-      const lvl = z.semanas[wk] || 0;
-      let intensity = 0;
-      if(mode === 'clima'){
-        const rain = (z._climaRain && z._climaRain[wk] != null) ? z._climaRain[wk] : 0;
-        const wind = (z._climaWind && z._climaWind[wk] != null) ? z._climaWind[wk] : 0;
-        intensity = climaIntensityAt(rain, wind).intensity;
-      }
+      // En clima el punto ES el semáforo: nivel integral (física + ciclón + crecida).
+      const lvl = (mode === 'clima') ? nivelDeZona(z) : (z.semanas[wk] || 0);
       return {
         type: 'Feature',
-        properties: { cve: z.cve, zm: z.zm, level: lvl, intensity },
+        properties: { cve: z.cve, zm: z.zm, level: lvl },
         geometry: { type: 'Point', coordinates: [z.lng, z.lat] }
       };
     })
@@ -3690,7 +3829,7 @@ function refreshHexClima(){
   setLayerVis('zonas-hex-fill', false);
   setLayerVis('zonas-label', layerVis.labels);
 }
-function refreshMap(){ refreshCorridors(); refreshHex(); }
+function refreshMap(){ refreshCorridors(); refreshHex(); refreshGeocercas(); }
 
 function doSelect(z){
   sel = z;
@@ -3704,7 +3843,8 @@ function doSelect(z){
 }
 
 function showDet(z){
-  const n = z.semanas[wk], [lbl,col,bg] = lvlMeta(n);
+  const n = (mode === 'clima') ? nivelDeZona(z) : z.semanas[wk];
+  const [lbl,col,bg] = lvlMeta(n);
   document.getElementById('dn').textContent = z.zm;
   document.getElementById('ds').textContent = z.estado + ' · ' + z.n_mun + ' municipios';
   const ne = document.getElementById('dniv');
@@ -3714,7 +3854,7 @@ function showDet(z){
   document.getElementById('dsm').textContent = z.max;
   document.getElementById('dch').innerHTML = z.semanas.map((v,i)=>{
     const h = v===0?2:v===1?16:32;
-    const c = v===2?'#e03020':v===1?'#e4c249':'rgba(255,255,255,0.07)';
+    const c = v>0?nivelColor(v):'rgba(255,255,255,0.07)';
     const hl = i===wk?'outline:2px solid var(--aleph-yellow);outline-offset:1px;box-shadow:0 0 6px rgba(228,194,73,0.5);':'';
     return '<div class="dbar" style="height:'+h+'px;background:'+c+';'+hl+'"></div>';
   }).join('');
@@ -3744,7 +3884,7 @@ function showDet(z){
     lvlEl.textContent = lvlTxt;
     lvlEl.style.color = col;
     const reasons = (z._climaReasons && z._climaReasons[wk]) || [];
-    const action = playbookFor(n, z._climaCat ? z._climaCat[wk] : null);
+    const action = playbookFor(Math.min(3, n), z._climaCat ? z._climaCat[wk] : null);
     document.getElementById('clmwhy').innerHTML =
       (reasons.length ? ('Motivo: '+reasons.join(' · ')) : '')
       + (action ? '<div style="margin-top:5px;color:rgba(255,255,255,0.75)"><span style="color:var(--aleph-yellow);font-weight:600">Sugerencia:</span> '+action+'</div>' : '');
@@ -3757,6 +3897,19 @@ function showDet(z){
       floodEl.style.display = 'none';
     }
     document.getElementById('clmsiat').innerHTML = siatChipHTML(siatForPoint(z.lat, z.lng));
+    const nz = nivelDeZona(z);
+    const geoEl = document.getElementById('clmgeo');
+    if(nz >= 2){
+      const c = nivelColor(nz);
+      const dentro = sitiosEnGeocerca().filter(x => x.geocerca.zona.cve === z.cve);
+      geoEl.style.display = 'block';
+      geoEl.style.color = c;
+      geoEl.innerHTML = '⬤ Geocerca de afectación: radio '+GEOCERCA_KM[nz]+' km ('+nivelFlag(nz)+').'
+        + (dentro.length ? ' Tus activos dentro: <b>'+dentro.map(x => escHTML(x.sitio.name)).join(', ')+'</b>.'
+                         : ' Sin activos tuyos dentro.');
+    } else {
+      geoEl.style.display = 'none';
+    }
   }
   // Contexto histórico (solo clima): qué tan expuesta ha estado ESTA zona.
   const histBlock = document.getElementById('clima-hist-block');
@@ -3834,10 +3987,11 @@ function renderAll(){
     if(isClima){
       const niveles = banderasPorRegion();
       regEl.innerHTML = '<div class="reg-flags">' + REGIONES_OPS.map(r => {
-        const m = BANDERA_META[niveles[r]];
-        return '<div class="reg-flag" style="border-color:'+m.c+'66;background:'+m.c+'14">'
-          + '<div class="rf-name" style="color:'+m.c+'">'+r+'</div>'
-          + '<div class="rf-lvl" style="color:'+m.c+'">'+m.n+'</div></div>';
+        const m = NIVELES[niveles[r]];
+        return '<div class="reg-flag" style="border-color:'+m.color+'66;background:'+m.color+'14" title="'+m.accion+'">'
+          + '<div class="rf-name" style="color:'+m.color+'">'+r+'</div>'
+          + '<div class="rf-lvl" style="color:'+m.color+'">'+m.flag+'</div>'
+          + '<div class="rf-verb">'+m.verbo+'</div></div>';
       }).join('') + '</div>';
     } else {
       regEl.innerHTML = '';
@@ -3855,7 +4009,8 @@ function renderAll(){
   // We normalise heights against the busiest week in the series so the shape
   // is comparable across the timeline.
   const counts = SEMANAS.map((_, i) => ZONAS.filter(z => z.semanas[i] > 0).length);
-  const reds   = SEMANAS.map((_, i) => ZONAS.some(z => z.semanas[i] === 2));
+  const reds   = SEMANAS.map((_, i) => ZONAS.some(z => z.semanas[i] >= 3));
+  const topeDia = SEMANAS.map((_, i) => Math.max(0, ...ZONAS.map(z => z.semanas[i] || 0)));
   const peak = Math.max(1, ...counts);
   const dotsEl = document.getElementById('dots-r');
   if(isClima){
@@ -3863,7 +4018,7 @@ function renderAll(){
     const DOW = ['DOM','LUN','MAR','MIÉ','JUE','VIE','SÁB'];
     const chips = SEMANAS.map((s, i) => {
       const c = counts[i];
-      const col = c === 0 ? '#3ecf6e' : (reds[i] ? '#e03020' : '#e4c249');
+      const col = nivelColor(topeDia[i]);
       const lbl = i === 0 ? 'HOY' : (i === 1 ? 'MAÑ' : DOW[new Date(s+'T12:00:00').getDay()]);
       const title = fmtD(s) + ' · ' + c + (c === 1 ? ' zona en alerta' : ' zonas en alerta');
       return '<div class="day-chip'+(i===wk?' on':'')+'" onclick="jmpW('+i+')" role="button" tabindex="0" title="'+title+'">'
@@ -3937,7 +4092,7 @@ function renderZMList(){
   const unit = (mode === 'clima') ? 'd' : 's';
   const mkRow = z => {
     const n = z.semanas[wk];
-    const dot = n===2?'#e03020':n===1?'#e4c249':'rgba(255,255,255,0.14)';
+    const dot = n>0?nivelColor(n):'rgba(255,255,255,0.14)';
     const isSel = sel && sel.cve === z.cve;
     return '<div class="zmr'+(isSel?' sel':'')+(n===0?' dim':'')+'" onclick="clkZ('+z.cve+')"><div class="zd" style="background:'+dot+'"></div><div class="zn">'+z.zm+'</div><div class="zw">'+(z.alertas>0?z.alertas+unit:'')+'</div></div>';
   };
@@ -4014,7 +4169,7 @@ function renderHistory(){
         const why = (z._climaReasons && z._climaReasons[i] && z._climaReasons[i].length) ? ' · '+z._climaReasons[i].join(', ') : '';
         return '<div class="hist-bar" style="background:'+c+';'+bd+';'+hl+'" onclick="event.stopPropagation();jmpW('+i+')" title="'+fmtD(SEMANAS[i])+why+'"></div>';
       }).join('');
-      const cnt = '<span style="color:'+(maxLvl===2?'#ff8070':'#f5d066')+'">'+days+'d alerta</span>';
+      const cnt = '<span style="color:'+nivelColor(maxLvl)+'">'+days+'d '+nivelFlag(maxLvl).toLowerCase()+'</span>';
       return '<div class="hist-row"><div class="hist-name" onclick="clkZ('+z.cve+')">'+z.zm+'</div><div class="hist-bars">'+bars+'</div><div class="hist-count">'+cnt+'</div></div>';
     }).join('');
     const clearCount = ZONAS.length - ranked.length;
@@ -4025,7 +4180,7 @@ function renderHistory(){
   const sorted = [...ZONAS].sort((a,b) => b.alertas - a.alertas).filter(z => z.alertas > 0);
   const html = sorted.map(z => {
     const bars = z.semanas.map((v,i) => {
-      const c = v===2?'#e03020':v===1?'#e4c249':'rgba(255,255,255,0.08)';
+      const c = v>0?nivelColor(v):'rgba(255,255,255,0.08)';
       const bd = v===0?'border:1px solid rgba(255,255,255,0.1)':'';
       const hl = i===wk?'outline:1px solid rgba(228,194,73,0.55);outline-offset:1px;':'';
       return '<div class="hist-bar" style="background:'+c+';'+bd+';'+hl+'" onclick="event.stopPropagation();jmpW('+i+')" title="'+fmtD(SEMANAS[i])+'"></div>';
@@ -4045,21 +4200,25 @@ function renderCorridors(){
       el.innerHTML = '<div style="padding:16px;font-size:12px;color:var(--text-dim);font-style:italic;text-align:center;">Cargando pronóstico de corredores…</div>';
       return;
     }
-    const ranked = CORRIDORS.map((c, ci) => ({
+    const todos = CORRIDORS.map((c, ci) => ({
       corr: c,
       lvl: corridorClimaLevels[ci][wk] || 0,
       stats: corridorClimaStats[ci][wk] || { rain:0, gust:0 }
-    })).filter(x => x.lvl > 0)
+    }));
+    const enVerde = todos.filter(x => x.lvl === 1).length;
+    const ranked = todos.filter(x => x.lvl >= 2)
       .sort((a,b) => b.lvl - a.lvl || b.stats.rain - a.stats.rain || b.stats.gust - a.stats.gust);
+    const pieVerde = enVerde > 0
+      ? '<div style="padding:12px 16px;font-size:11px;color:var(--text-dim);font-style:italic;">+ '+enVerde+' corredor'+(enVerde>1?'es':'')+' en verde (vigilancia, sin acción requerida)</div>'
+      : '';
     if(ranked.length === 0){
-      el.innerHTML = '<div style="padding:16px;font-size:12px;color:var(--text-dim);font-style:italic;text-align:center;">Sin corredores con clima adverso este día</div>';
+      el.innerHTML = '<div style="padding:16px;font-size:12px;color:var(--text-dim);font-style:italic;text-align:center;">Sin corredores en preparación o superior este día</div>' + pieVerde;
       return;
     }
     el.innerHTML = ranked.map(x => {
       const c = x.corr;
-      const levelBadge = x.lvl === 2
-        ? '<span class="corr-badge red">DISRUPCIÓN</span>'
-        : '<span class="corr-badge yellow">RETRASOS</span>';
+      const lm = NIVELES[Math.max(1, Math.min(4, x.lvl))];
+      const levelBadge = '<span class="corr-badge" style="background:'+lm.color+'22;color:'+lm.color+'">'+lm.flag+'</span>';
       const typeBadge = '<span class="corr-type '+c.type+'">'+(c.type === 'cuota' ? 'CUOTA' : 'LIBRE')+'</span>';
       const detail = [
         x.stats.rain >= 1 ? x.stats.rain.toFixed(0)+' mm lluvia máx' : null,
@@ -4072,7 +4231,7 @@ function renderCorridors(){
         '<div class="corr-name">'+c.name+'</div>' +
         '<div style="font-size:10px;color:var(--text-dim)">'+detail+'</div>' +
       '</div>';
-    }).join('');
+    }).join('') + pieVerde;
     return;
   }
   // For each corridor, count how many ZMs in alert this week it crosses
@@ -4133,9 +4292,9 @@ tickerState.rafId = requestAnimationFrame(animateTicker);
   const T = CLIMA_THRESHOLDS;
   el.innerHTML =
     'Cada zona y corredor se evalúa por día contra umbrales operativos:<br>'
-    +'<span style="color:var(--aleph-yellow)">● Retrasos probables</span> — lluvia ≥'+T.yellowRain+' mm, viento ≥'+T.yellowWind+' km/h, ráfagas ≥'+T.yellowGust+' km/h, calor ≥'+T.yellowHeat+'°C, niebla o tormenta eléctrica.<br>'
-    +'<span style="color:var(--red)">● Disrupción alta</span> — lluvia ≥'+T.redRain+' mm, viento ≥'+T.redWind+' km/h, ráfagas ≥'+T.redGust+' km/h o calor ≥'+T.redHeat+'°C.<br>'
-    +'Se aplica el criterio más severo que se cumpla y el nivel siempre indica <em>qué variable</em> lo disparó. Un corredor toma el peor punto de su ruta.<br><br>'
+    +[1,2,3].map(n => '<span style="color:'+NIVELES[n].color+'">● Alerta '+NIVELES[n].flag+' · '+NIVELES[n].verbo+'</span> — lluvia ≥'+T.rain[n-1]+' mm, viento ≥'+T.wind[n-1]+' km/h, ráfagas ≥'+T.gust[n-1]+' km/h, calor ≥'+T.heat[n-1]+'°C'+(n===1?', niebla o tormenta eléctrica':'')+'.').join('<br>')
+    +'<br><span style="color:'+NIVELES[4].color+'">● Alerta ROJO · Emergencia</span> — afectación observada o impacto inminente de ciclón; el pronóstico por sí solo no llega a rojo.<br><br>'
+    +'La escala es <b>evolutiva y acumulativa</b>: cada nivel hereda las acciones del anterior, y el color describe el estado del fenómeno (puede sostenerse días). Se aplica el criterio más severo que se cumpla y el nivel siempre indica <em>qué variable</em> lo disparó. Un corredor toma el peor punto de su ruta.<br><br>'
     +'<b>Ciclones — SIAT-CT estimado:</b> con la trayectoria pronosticada del NHC aplicamos la matriz oficial de acercamiento del SIAT-CT (intensidad × horas al impacto de la línea de vientos de 63 km/h) para estimar la alerta '
     +'<span style="color:#1d6fc2">azul</span>/<span style="color:#3ecf6e">verde</span>/<span style="color:#e4c249">amarilla</span>/<span style="color:#ff9530">naranja</span>/<span style="color:#e03020">roja</span> por zona y sitio. La declaratoria oficial la emite la CNPC.';
 })();
@@ -4189,6 +4348,7 @@ try {
     map.addSource('hurr-points', { type:'geojson', data: hurricanesFC('points') });
     map.addSource('quakes',      { type:'geojson', data: quakesFC() });
     map.addSource('sites',       { type:'geojson', data: sitesFC() });
+    map.addSource('geocercas',   { type:'geojson', data: geocercasFC() });
     // Agua superficial observada por satélite 1984–2021 (JRC Global Surface
     // Water, Copernicus/Landsat). Ocurrencia observada, no índice: azul =
     // ahí HA habido agua. Tiles públicos con CORS abierto.
@@ -4226,8 +4386,9 @@ try {
       paint: {
         'line-color': ['case',
           ['get','affected'], '#c81f10',
-          ['==', ['get','weekLevel'], 2], '#e03020',
-          ['==', ['get','weekLevel'], 1], '#e4c249',
+          ['>=', ['get','weekLevel'], 3], NIVELES[3].mapa,
+          ['==', ['get','weekLevel'], 2], NIVELES[2].mapa,
+          ['==', ['get','weekLevel'], 1], NIVELES[1].mapa,
           '#1a1a1a'
         ],
         'line-width': ['case',
@@ -4290,8 +4451,9 @@ try {
       },
       paint: {
         'text-color': ['case',
-          ['==', ['get','level'], 2], '#c81f10',
-          ['==', ['get','level'], 1], '#a78117',
+          ['>=', ['get','level'], 4], '#c81f10',
+          ['==', ['get','level'], 3], '#b35e0f',
+          ['==', ['get','level'], 2], '#a78117',
           '#1a1a1a'
         ],
         'text-halo-color': 'rgba(255,255,255,0.95)',
@@ -4307,6 +4469,24 @@ try {
       minzoom: 6,
       layout: { visibility: 'none' },
       paint: { 'raster-opacity': 0.75 }
+    }, firstSymbolLayer);
+
+    // Geocercas de afectación — debajo de todo lo demás, como contexto de área.
+    map.addLayer({
+      id: 'geocercas-fill', type: 'fill', source: 'geocercas',
+      layout: { visibility: 'none' },
+      paint: {
+        'fill-color': ['match', ['get','nivel'], 4, NIVELES[4].mapa, 3, NIVELES[3].mapa, NIVELES[2].mapa],
+        'fill-opacity': ['match', ['get','nivel'], 4, 0.22, 3, 0.18, 0.13]
+      }
+    }, firstSymbolLayer);
+    map.addLayer({
+      id: 'geocercas-line', type: 'line', source: 'geocercas',
+      layout: { visibility: 'none' },
+      paint: {
+        'line-color': ['match', ['get','nivel'], 4, NIVELES[4].mapa, 3, NIVELES[3].mapa, NIVELES[2].mapa],
+        'line-width': 1.2, 'line-opacity': 0.75, 'line-dasharray': [3,2]
+      }
     }, firstSymbolLayer);
 
     // ── Capas de riesgo externo (solo modo clima) ─────────────────────────
@@ -4397,7 +4577,7 @@ try {
       layout: { visibility: 'none' },
       paint: {
         'circle-radius': 9,
-        'circle-color': ['match', ['get','level'], 2, '#e03020', 1, '#e4c249', '#3ecf6e'],
+        'circle-color': ['match', ['get','level'], 4, NIVELES[4].mapa, 3, NIVELES[3].mapa, 2, NIVELES[2].mapa, 1, NIVELES[1].mapa, NIVELES[0].mapa],
         'circle-stroke-color': '#0a0a0a',
         'circle-stroke-width': 2.2,
         'circle-opacity': 0.95
@@ -4446,11 +4626,21 @@ try {
       const z = ZONAS.find(z => z.cve === cve);
       if(z) doSelect(z);
     };
+    map.on('mouseenter', 'geocercas-fill', (e) => {
+      const p = e.features[0].properties;
+      hoverPopup.setLngLat(e.lngLat).setHTML(
+        '<div class="tn">Geocerca de afectación</div>'
+        + '<div class="ts">'+escHTML(p.zm)+' · radio '+p.km+' km</div>'
+        + '<div class="tl" style="color:'+nivelColor(p.nivel)+'">ALERTA '+p.flag+'</div>'
+        + '<div class="ti">Área donde no conviene operación en calle mientras dure la alerta.</div>'
+      ).addTo(map);
+    });
+    map.on('mouseleave', 'geocercas-fill', () => { hoverPopup.remove(); });
     map.on('mouseenter', 'sites-circle', (e) => {
       map.getCanvas().style.cursor = 'pointer';
       const p = e.features[0].properties;
       const r = siteRisk(p.idx, wk);
-      const [lbl, col] = lvlMeta(r ? r.level : 0);
+      const [lbl, col] = lvlMeta(sites[p.idx] ? nivelSitio(p.idx, sites[p.idx]) : 0);
       hoverPopup.setLngLat(e.lngLat).setHTML(
         '<div class="tn">'+escHTML(p.name)+'</div>'
         + '<div class="tl" style="color:'+col+'">'+lbl+'</div>'

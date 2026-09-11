@@ -6,7 +6,9 @@ Sistema de riesgo climático-operativo para empresas en México, desarrollado po
 
 ## Qué hace
 
-- **Semáforo con atribución y acción**: cada zona/corredor/sitio indica su nivel, *qué variable lo disparó* (lluvia, viento, ráfagas, calor, visibilidad) y una *sugerencia operativa* (playbook por causa y severidad).
+- **Escala de Protección Civil, evolutiva y acumulativa**: sin alerta → 🟢 verde (informarse) → 🟡 amarillo (preparación) → 🟠 naranja (coordinación) → 🔴 rojo (emergencia). Cada nivel hereda las acciones del anterior; el color describe el **estado del fenómeno** (puede sostenerse días) y el aviso se dispara por transición a naranja/rojo. El pronóstico topa en naranja: solo el impacto de ciclón o la afectación observada llegan a rojo.
+- **Semáforo con atribución y acción**: cada zona/corredor/sitio indica su nivel, *qué variable lo disparó* (lluvia, viento, ráfagas, calor, visibilidad) y la acción que corresponde.
+- **Geocercas de afectación**: cada zona en amarillo o peor genera un área de 25–60 km según nivel — para el personal que anda disperso por territorio, no sobre una carretera — y el portal y el mensaje dicen qué activos quedaron dentro.
 - **Mis sitios**: el usuario agrega sus plantas/CEDIS con clic en el mapa (localStorage); cada sitio recibe pronóstico propio a 7 días, exposición histórica (CENAPRED + HURDAT2) y alerta si cae dentro del cono de un ciclón activo del NHC.
 - **Parte operativo**: botón que copia al portapapeles el resumen del día (sitios, zonas y corredores en rojo, ciclones, crecidas) listo para pegar en el chat del comité.
 - **Frescura y revalidación**: hora de descarga visible junto al headline; el semáforo se revalida cada 30 min y al volver a la pestaña.
@@ -77,13 +79,17 @@ python3 motor/ejercicio.py --hoy                 # snapshot técnico con evidenc
 python3 motor/ejercicio.py --simulacro observado # + respuesta institucional (piso)
 ```
 
-`corte.py` implementa el caso de uso del cliente: agrega por sus 4 regiones (`motor/regiones.json`), corre la máquina de estados NORMAL → SEGUIMIENTO → ALERTA → CIERRE y emite el mensaje de WhatsApp según las plantillas canónicas de `motor/PLANTILLAS.md` (corte verde 2×/día; ficha extraordinaria solo al cruzar a naranja/roja; cierre explícito; el silencio está prohibido). La memoria de estado y la bitácora de modo sombra viven en `motor/out/`.
+`corte.py` implementa el caso de uso del cliente: agrega por sus 4 regiones (`motor/regiones.json`), corre la máquina de estados NORMAL → SEGUIMIENTO → ALERTA → CIERRE y emite el mensaje de WhatsApp según las plantillas canónicas de `motor/PLANTILLAS.md` — tres cortes al día en condición normal (09:00, 14:00, 16:00), escalera de cadencia con alerta activa, ficha extraordinaria solo al cruzar a naranja/rojo, cierre explícito, y el silencio está prohibido. La memoria de estado y la bitácora de modo sombra viven en `motor/out/`.
 
 Reglas de fusión: la peor señal creíble manda; lluvia sobre terreno vulnerable (puntos críticos CONAGUA / CENAPRED alto) escala un nivel; la respuesta institucional observada solo escala, nunca des-escala. Señales: física (Open-Meteo), ciclón (SIAT-CT estimado desde NHC), hidrología (GloFAS), observado (`motor/observados.json`, después Sonar). Salidas en `motor/out/` (evidencia completa + `sombra.jsonl` para medir precisión y anticipación). Solo stdlib de Python.
 
 ## Alertas por WhatsApp
 
-El protocolo define qué llega — cortes de 07:00 y 16:00, y fichas inmediatas solo en naranja/roja — así que el registro pide únicamente nombre, número y regiones (Norte/Occidente/Centro/Sureste). El registro va a `api/suscribir.js` (Vercel Function), que valida, normaliza (+52) y reenvía al webhook central si `SUSCRIPCIONES_WEBHOOK` está configurado — el punto de integración con Hamilton/Sonar, donde correrá el envío real por WhatsApp. La configuración persiste en `localStorage`.
+El protocolo define qué llega — cortes de 09:00, 14:00 y 16:00, y fichas inmediatas solo en naranja/rojo — así que el registro pide únicamente nombre, número y regiones (Norte/Occidente/Centro/Sureste). El registro va a `api/suscribir.js` (Vercel Function), que valida, normaliza (+52) y reenvía al webhook central si `SUSCRIPCIONES_WEBHOOK` está configurado — el punto de integración con Hamilton/Sonar, donde correrá el envío real por WhatsApp. La configuración persiste en `localStorage`.
+
+## Plan de entregas
+
+Ver [`TIMELINE.md`](TIMELINE.md) — hitos acordables con el cliente y pendientes de cada lado.
 
 ## Roadmap
 

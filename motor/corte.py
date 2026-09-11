@@ -1,24 +1,27 @@
 #!/usr/bin/env python3
-"""El corte — genera el mensaje de WhatsApp del servicio, 2×/día.
+"""El corte — genera el mensaje de WhatsApp del servicio.
 
-Este script ES el producto según el caso de uso del cliente: dos mensajes al
-día (mañana y tarde) con la situación agregada por SUS 4 regiones, y mensajes
-extraordinarios solo cuando algo cruza a NARANJA/ROJA. Máquina de estados:
+Este script ES el producto según el caso de uso del cliente: tres revisiones
+al día en condición normal (09:00, 14:00 y 16:00 — inicio de mañana, mitad del
+día y final del día), con la situación agregada por SUS 4 regiones, y mensajes
+extraordinarios solo cuando algo cruza a NARANJA/ROJO. Con alerta activa la
+cadencia sube (ver CORTES_ALERTA / CORTES_ALTA). Máquina de estados:
 
-  NORMAL      → corte verde de 3 líneas (su trabajo es existir: diligencia)
+  NORMAL      → corte breve (su trabajo es existir: demostrar diligencia)
   SEGUIMIENTO → hay ciclón relevante aún sin naranja: el corte gana un bloque
-  ALERTA      → algo cruzó a naranja/roja: ficha extraordinaria + cadencia SIAT
-  CIERRE      → una alerta previa se degradó: se comunica el regreso a verde
+  ALERTA      → algo cruzó a naranja/rojo: ficha extraordinaria + cadencia alta
+  CIERRE      → una alerta previa se degradó: se comunica el regreso a normal
 
 Reglas duras (ver PLANTILLAS.md):
   * el mensaje se diseña para el SEGUNDO lector (el gerente que lo recibe
     reenviado): autocontenido, sin links obligatorios, una pantalla
-  * el amarillo aparece en el corte pero JAMÁS genera mensaje extraordinario
+  * la escala es evolutiva y acumulativa; verde NO es "libre"
+  * verde y amarillo se reportan en el corte pero JAMÁS interrumpen
   * el silencio está prohibido: si el motor falla, sale el mensaje de falla
   * siempre se anuncia la próxima revisión
 
 Uso:
-  python3 motor/corte.py                      # corte en vivo (detecta 07/16 h)
+  python3 motor/corte.py                      # corte en vivo
   python3 motor/corte.py --simulacro huracan  # ensayo con ciclón sintético
   python3 motor/corte.py --reset              # borra memoria de estado (pruebas)
 
@@ -41,8 +44,37 @@ OUT = Path(__file__).resolve().parent / "out"
 ESTADO = OUT / "estado_corte.json"
 CDMX = timezone(timedelta(hours=-6))
 
-EMOJI = {0: "🟢", 1: "🟢", 2: "🟠", 3: "🔴"}   # el amarillo no cambia el veredicto del corte
-NOMBRE = {0: "VERDE", 1: "VERDE con vigilancia", 2: "NARANJA", 3: "ROJA"}
+# Escala de Protección Civil (ver PLANTILLAS.md). El emoji del encabezado es
+# el veredicto del corte; amarillo se reporta pero no interrumpe.
+EMOJI = {0: "🟢", 1: "🟢", 2: "🟡", 3: "🟠", 4: "🔴"}
+NOMBRE = {0: "SIN ALERTA", 1: "VERDE", 2: "AMARILLO", 3: "NARANJA", 4: "ROJO"}
+VERBO = {0: "Rutina", 1: "Informarse", 2: "Preparación", 3: "Coordinación", 4: "Emergencia"}
+
+# ── Cadencia de cortes (la definió el cliente) ───────────────────────────
+# Condición normal: 3 revisiones — inicio de la mañana, mitad del día y final
+# del día. Con alerta activa se suman mitad de mañana y mitad de tarde; en
+# alerta alta, noche y madrugada. Un ciclón en fase de impacto va a cadencia
+# SIAT (cada 3 h) y se maneja como extraordinario.
+CORTES_NORMAL = ["09:00", "14:00", "16:00"]
+CORTES_ALERTA = ["09:00", "11:30", "14:00", "16:00", "17:30"]
+CORTES_ALTA = ["00:30", "06:00", "09:00", "11:30", "14:00", "16:00", "17:30", "21:00"]
+
+
+def cortes_del_dia(nivel_max):
+    if nivel_max >= 4:
+        return CORTES_ALTA
+    if nivel_max >= 3:
+        return CORTES_ALERTA
+    return CORTES_NORMAL
+
+
+def siguiente_corte(ahora, nivel_max):
+    """Próximo horario de la escalera; None si ya fue el último del día."""
+    hhmm = f"{ahora:%H:%M}"
+    for c in cortes_del_dia(nivel_max):
+        if c > hhmm:
+            return c
+    return None
 
 
 def cargar_objetivos():
@@ -59,18 +91,21 @@ def cargar_objetivos():
 
 
 def agregar_por_region(resultados, regiones):
-    agg = {r: {"nivel": 0, "alertas": [], "vigilancia": [], "seguimiento": []}
-           for r in regiones}
+    agg = {r: {"nivel": 0, "alertas": [], "preparacion": [], "vigilancia": [],
+               "seguimiento": []} for r in regiones}
     for r in resultados:
         reg = agg[r["region"]]
         reg["nivel"] = max(reg["nivel"], r["nivel"])
         razon = r["evidencia"][0]["detalle"] if r["evidencia"] else ""
-        if r["nivel"] >= 2:
-            reg["alertas"].append((r["objetivo"], r["nivel"], razon, r["accion"]))
-        elif r["nivel"] == 1:
+        if r["nivel"] >= 3:          # naranja o rojo: exige acción
+            reg["alertas"].append((r["objetivo"], r["nivel"], razon, r["accion"],
+                                   r.get("geocerca_km", 0)))
+        elif r["nivel"] == 2:        # amarillo: preparación
+            reg["preparacion"].append((r["objetivo"], razon))
+        elif r["nivel"] == 1:        # verde: informarse
             reg["vigilancia"].append((r["objetivo"], razon))
         siat = r["senales"].get("siat")
-        if siat and r["nivel"] < 2:
+        if siat and r["nivel"] < 3:
             reg["seguimiento"].append((r["objetivo"], siat))
     return agg
 
@@ -86,14 +121,17 @@ def encabezado(nivel_max, ahora, extraordinario=False):
     dias = ["lun", "mar", "mié", "jue", "vie", "sáb", "dom"]
     fecha = f"{dias[ahora.weekday()]} {ahora.day} {['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'][ahora.month-1]}"
     etiqueta = "ALERTA" if extraordinario else f"corte {ahora:%H:%M}"
-    return f"{EMOJI[nivel_max]} *CLIMÓMETRO · {fecha} · {etiqueta}*"
+    return f"{EMOJI.get(nivel_max, '🟢')} *CLIMÓMETRO · {fecha} · {etiqueta}*"
 
 
 def proxima_revision(ahora, nivel_max):
-    if nivel_max >= 2:
-        return f"Próxima actualización: {(ahora + timedelta(hours=3)):%H:%M} o antes si cambia la situación."
-    prox = "16:00" if ahora.hour < 15 else "07:00 de mañana"
-    return f"Próxima revisión: {prox}."
+    if nivel_max >= 3:
+        return (f"Próxima actualización: {(ahora + timedelta(hours=3)):%H:%M} "
+                "(cadencia de alerta) o antes si cambia la situación.")
+    prox = siguiente_corte(ahora, nivel_max)
+    if prox:
+        return f"Próxima revisión: {prox}."
+    return f"Próxima revisión: {cortes_del_dia(nivel_max)[0]} de mañana."
 
 
 def pie(ahora):
@@ -101,22 +139,27 @@ def pie(ahora):
 
 
 def mensaje_normal(agg, ahora, seguimiento_bloques):
-    lineas = [encabezado(0, ahora)]
+    nivel_max = max(d["nivel"] for d in agg.values())
+    lineas = [encabezado(nivel_max, ahora)]
     lineas.append("Sin alertas naranja o roja en las 4 regiones."
                   if not seguimiento_bloques else
                   "Sin alertas naranja o roja; ciclón en seguimiento (abajo).")
-    vig = [(reg, v) for reg, d in agg.items() for v in d["vigilancia"]]
-    if vig:
+    # Amarillo (preparación) y verde (vigilancia) se reportan pero no interrumpen
+    for nivel, clave, titulo in ((2, "preparacion", "En preparación (amarillo)"),
+                                 (1, "vigilancia", "En vigilancia (verde)")):
+        filas = [(reg, v) for reg, d in agg.items() for v in d[clave]]
+        if not filas:
+            continue
         por_region = {}
-        for reg, (obj, razon) in vig:
-            por_region.setdefault(reg, []).append(f"{obj} ({razon})")
+        for reg, (obj, razon) in filas:
+            por_region.setdefault(reg, []).append(f"{obj} ({razon})" if nivel == 2 else obj)
         partes = []
         for reg, objs in por_region.items():
             extra = f" +{len(objs)-3}" if len(objs) > 3 else ""
             partes.append(f"{reg}: " + ", ".join(objs[:3]) + extra)
-        lineas.append("Vigilancia (sin acción requerida): " + " · ".join(partes) + ".")
+        lineas.append(f"_{titulo}_: " + " · ".join(partes) + ".")
     lineas += seguimiento_bloques
-    lineas.append(proxima_revision(ahora, 0))
+    lineas.append(proxima_revision(ahora, nivel_max))
     lineas.append(pie(ahora))
     return "\n".join(lineas)
 
@@ -143,15 +186,17 @@ def mensaje_alerta(agg, ahora, extraordinario):
     nivel_max = max(d["nivel"] for d in agg.values())
     lineas = [encabezado(nivel_max, ahora, extraordinario)]
     for reg, d in sorted(agg.items(), key=lambda x: -x[1]["nivel"]):
-        if d["nivel"] < 2:
+        if d["nivel"] < 3:
             continue
-        lineas.append(f"*Región {reg} — {NOMBRE[d['nivel']]}*")
-        for obj, nivel, razon, _ in d["alertas"][:4]:
-            lineas.append(f"• {obj}: {razon}")
+        lineas.append(f"*Región {reg} — ALERTA {NOMBRE[d['nivel']]} · {VERBO[d['nivel']]}*")
+        for obj, nivel, razon, _, geo in d["alertas"][:4]:
+            geotxt = f" · geocerca {geo} km" if geo else ""
+            lineas.append(f"• {obj}: {razon}{geotxt}")
         if len(d["alertas"]) > 4:
             lineas.append(f"• … y {len(d['alertas']) - 4} zonas más")
         lineas.append(f"→ {d['alertas'][0][3]}")
-    tranquilas = [reg for reg, d in agg.items() if d["nivel"] < 2]
+        lineas.append("_Personal disperso en esas áreas: suspender actividad en calle._")
+    tranquilas = [reg for reg, d in agg.items() if d["nivel"] < 3]
     if tranquilas:
         lineas.append("Resto del país sin alerta: " + ", ".join(tranquilas) + ".")
     if extraordinario:
@@ -164,7 +209,7 @@ def mensaje_alerta(agg, ahora, extraordinario):
 def mensaje_cierre(previas, agg, ahora):
     lineas = [encabezado(0, ahora)]
     nombres = ", ".join(sorted(previas))
-    lineas.append(f"*Cierre de alerta*: {nombres} regresa{'n' if len(previas) > 1 else ''} a nivel sin alerta.")
+    lineas.append(f"*Cierre de alerta*: {nombres} baja{'n' if len(previas) > 1 else ''} de alerta naranja/roja.")
     lineas.append("Vigilar efectos residuales 24 h (encharcamientos, cortes de energía, crecidas menores).")
     lineas.append(proxima_revision(ahora, 0))
     lineas.append(pie(ahora))
@@ -211,7 +256,7 @@ def main():
 
     agg = agregar_por_region(res["resultados"], regiones)
     nivel_max = max(d["nivel"] for d in agg.values())
-    en_alerta = sorted(reg for reg, d in agg.items() if d["nivel"] >= 2)
+    en_alerta = sorted(reg for reg, d in agg.items() if d["nivel"] >= 3)
 
     previo = {}
     if ESTADO.exists():
@@ -220,7 +265,7 @@ def main():
     nuevas = [r for r in en_alerta if r not in previas]
     cerradas = sorted(previas - set(en_alerta))
 
-    if nivel_max >= 2:
+    if nivel_max >= 3:
         fase = "ALERTA"
         texto = mensaje_alerta(agg, ahora, extraordinario=bool(nuevas))
     elif cerradas:

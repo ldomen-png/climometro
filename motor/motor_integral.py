@@ -16,9 +16,11 @@ Reglas de fusión (no es promedio — el riesgo se compone):
   * lo observado solo ESCALA (piso mínimo), nunca des-escala
   * toda bandera carga su evidencia (señal, valor, fuente)
 
-Salida: bandera en el vocabulario de Protección Civil
-  VERDE (normal) · AMARILLA (vigila) · NARANJA (actúa) · ROJA (emergencia)
-  + AZUL como anotación de aviso ciclónico lejano.
+Salida: bandera en la escala de Protección Civil — evolutiva y acumulativa
+  SIN ALERTA · VERDE (informarse) · AMARILLO (preparación) ·
+  NARANJA (coordinación) · ROJO (emergencia)
+El pronóstico topa en NARANJA; solo el impacto de ciclón o la afectación
+observada llegan a ROJO.
 
 Contrato pensado para consumirse después desde Hamilton (tool de Sherlock)
 o Sonar: JSON por objetivo con {bandera, señales, evidencia, accion}.
@@ -35,14 +37,16 @@ from pathlib import Path
 RAIZ = Path(__file__).resolve().parent.parent
 UA = {"User-Agent": "AlephClimometro/0.1 (motor integral; contacto@alephri.com)"}
 
-# ── Umbrales (idénticos a CLIMA_THRESHOLDS del portal) ───────────────────
+# ── Umbrales por tramo (idénticos a CLIMA_THRESHOLDS del portal) ─────────
+# Tres fronteras por variable: VERDE (existe) → AMARILLO (preparación) →
+# NARANJA (coordinación). El pronóstico no alcanza ROJO.
 UMBRALES = {
-    "lluvia": (15, 30),      # mm/día  → amarilla, naranja-física
-    "viento": (40, 60),      # km/h sostenido
-    "rafaga": (60, 85),      # km/h
-    "calor":  (42, 46),      # °C
+    "lluvia": (15, 30, 70),   # mm/día — moderada / fuerte / intensa (SMN)
+    "viento": (40, 60, 80),   # km/h sostenido
+    "rafaga": (60, 85, 110),  # km/h
+    "calor":  (42, 46, 48),   # °C
 }
-GLOFAS_RATIO = (2.0, 4.0)    # descarga/mediana31d → señal 1, señal 2
+GLOFAS_RATIO = (2.0, 4.0)    # descarga/mediana31d → amarillo, naranja
 
 # ── Matriz SIAT-CT de acercamiento (manual oficial SINAPROC) ─────────────
 SIAT_BINS = [72, 60, 48, 36, 24, 18, 12, 6]
@@ -57,15 +61,27 @@ SIAT_ACERCAMIENTO = [
 SIAT_RADIO = [200, 220, 240, 260, 280, 300]  # km por escala
 SIAT_NOMBRE = {"A": "AZUL·aviso", "V": "VERDE·prevención", "Y": "AMARILLA·preparación",
                "N": "NARANJA·alarma", "R": "ROJA·afectación"}
-# SIAT → nivel integral (0 verde, 1 amarilla, 2 naranja, 3 roja)
-SIAT_A_NIVEL = {"A": 0, "V": 0, "Y": 1, "N": 2, "R": 3}
+# SIAT → nivel de la escala de Protección Civil (azul y verde del SIAT
+# comparten "informarse"; el resto mapea uno a uno).
+SIAT_A_NIVEL = {"A": 1, "V": 1, "Y": 2, "N": 3, "R": 4}
 
-BANDERAS = ["VERDE", "AMARILLA", "NARANJA", "ROJA"]
+# ── Escala de alerta de Protección Civil: evolutiva y acumulativa ────────
+# El color describe el ESTADO del fenómeno (puede sostenerse días, como el
+# Popocatépetl en amarillo); el aviso se dispara por transición y criticidad.
+# Verde NO es "libre": es "hay algo que vigilar".
+BANDERAS = ["SIN ALERTA", "VERDE", "AMARILLO", "NARANJA", "ROJO"]
+VERBOS = ["Rutina", "Informarse", "Preparación", "Coordinación", "Emergencia"]
+# Radio de la geocerca de afectación por nivel (km): el área donde no conviene
+# operación en calle, para el personal disperso por territorio.
+GEOCERCA_KM = [0, 0, 25, 40, 60]
 ACCIONES = {
-    0: "Operación normal. Monitoreo de rutina.",
-    1: "Vigila: revisa pronóstico antes de despachar; confirma rutas con transportistas.",
-    2: "Actúa: activa comité regional, reprograma embarques expuestos, notifica a sitios.",
-    3: "Emergencia: suspende operación en zona, resguardo de personal, protocolo de crisis.",
+    0: "Condiciones normales. Monitoreo de rutina.",
+    1: "Mantenerse informado: fenómeno en desarrollo con seguimiento activo.",
+    2: "Además: revisar planes y directorios, preparar recursos y establecer "
+       "comunicación con cuerpos de socorro.",
+    3: "Además: sesión de comité, planeación ante impacto, reprogramar operación "
+       "y resguardar personal expuesto.",
+    4: "Además: activar refugios, evacuación y rescate; suspender operación en la zona.",
 }
 
 
@@ -244,8 +260,19 @@ def contexto_terreno(lat, lng, est, radio_km=15):
 
 # ── Señales ──────────────────────────────────────────────────────────────
 
+def _tramo(val, fronteras):
+    """Nivel 1..3 según la frontera cruzada; 0 si no cruza ninguna."""
+    if val is None:
+        return 0
+    n = 0
+    for i, f in enumerate(fronteras):
+        if val >= f:
+            n = i + 1
+    return n
+
+
 def senal_fisica(daily, dia=0):
-    """Nivel 0/1/2 + razones, día `dia` del pronóstico."""
+    """Nivel 0..3 (tope NARANJA) + razones, día `dia` del pronóstico."""
     if not daily:
         return {"nivel": 0, "razones": [], "causa": None}
     g = lambda k: (daily.get(k) or [None] * 7)[dia]
@@ -258,18 +285,15 @@ def senal_fisica(daily, dia=0):
         razones.append(txt)
         if n > nivel:
             nivel, causa = n, c
-    for val, (a, r), fmt, c in [
+    for val, fronteras, fmt, c in [
         (lluvia, UMBRALES["lluvia"], "{:.0f} mm de lluvia", "lluvia"),
         (viento, UMBRALES["viento"], "viento {:.0f} km/h", "viento"),
         (rafaga, UMBRALES["rafaga"], "ráfagas {:.0f} km/h", "viento"),
         (tmax, UMBRALES["calor"], "calor {:.0f}°C", "calor"),
     ]:
-        if val is None:
-            continue
-        if val >= r:
-            sube(2, fmt.format(val), c)
-        elif val >= a:
-            sube(1, fmt.format(val), c)
+        n = _tramo(val, fronteras)
+        if n:
+            sube(n, fmt.format(val), c)
     if code is not None and nivel == 0:
         if code >= 95:
             sube(1, "tormenta eléctrica", "visibilidad")
@@ -326,15 +350,16 @@ def senal_hidro(flood):
     if mediana <= 0.5 or fmax <= 5:
         return {"nivel": 0, "ratio": None}
     ratio = fmax / mediana
-    nivel = 2 if ratio >= GLOFAS_RATIO[1] else (1 if ratio >= GLOFAS_RATIO[0] else 0)
+    nivel = 3 if ratio >= GLOFAS_RATIO[1] else (2 if ratio >= GLOFAS_RATIO[0] else 0)
     return {"nivel": nivel, "ratio": round(ratio, 1), "max_m3s": round(fmax, 1)}
 
 
 def senal_observada(lat, lng, observados, radio_km=40):
     """Respuesta institucional confirmada cerca del objetivo. Hoy: archivo
     manual motor/observados.json; mañana: query a Sonar (misma forma)."""
-    PISO = {"aviso_pc": 1, "comite": 2, "refugio": 2, "desalojo": 2,
-            "declaratoria": 3, "evacuacion": 3}
+    # Solo lo observado puede llegar a ROJO: es "la emergencia ya nos alcanzó".
+    PISO = {"aviso_pc": 2, "comite": 3, "refugio": 4, "desalojo": 4,
+            "declaratoria": 4, "evacuacion": 4}
     mejor = None
     for ev in observados:
         if km(lat, lng, ev["lat"], ev["lng"]) > ev.get("radio_km", radio_km):
@@ -363,11 +388,15 @@ def fusionar(objetivo, daily, flood, tormentas, est, observados, dia=0):
         nivel = max(nivel, siat["nivel"])
         evidencia.append(("ciclón", f"SIAT-CT est. {siat['nombre']} — {siat['tormenta']}"
                           f" a {siat['dist_km']} km (~{siat['horas']} h)", "NHC"))
+    # GloFAS topa en AMARILLO por sí solo: su píxel (~5 km) puede no caer sobre
+    # el río correcto, y un falso naranja convoca comités de más. Escala a
+    # naranja solo por convergencia con lluvia (abajo).
     if hid["nivel"] > 0:
-        nivel = max(nivel, hid["nivel"] if hid["nivel"] >= 2 else 1)
+        nivel = max(nivel, min(2, hid["nivel"]))
         evidencia.append(("hidrología", f"descarga {hid['ratio']}× la mediana 31d", "GloFAS"))
 
-    # convergencia: lluvia relevante sobre terreno vulnerable escala un nivel
+    # convergencia: lluvia relevante sobre terreno vulnerable escala un nivel,
+    # sin pasar de NARANJA (el pronóstico no declara emergencia)
     convergio = False
     if terr["vulnerable"] and fis["causa"] == "lluvia" and fis["nivel"] >= 1 and nivel < 3:
         extra = hid["nivel"] > 0
@@ -389,12 +418,14 @@ def fusionar(objetivo, daily, flood, tormentas, est, observados, dia=0):
         nivel = max(nivel, obs["piso"])
         evidencia.append(("observado", f"{obs['tipo']}: {obs['detalle']}", obs["fuente"]))
 
-    nivel = max(0, min(3, nivel))
+    nivel = max(0, min(4, nivel))
     return {
         "objetivo": objetivo["nombre"],
         "lat": objetivo["lat"], "lng": objetivo["lng"],
         "bandera": BANDERAS[nivel],
+        "verbo": VERBOS[nivel],
         "nivel": nivel,
+        "geocerca_km": GEOCERCA_KM[nivel],
         "accion": ACCIONES[nivel],
         "senales": {"fisica": fis, "siat": siat, "hidrologia": hid,
                     "terreno": terr, "observado": obs},
