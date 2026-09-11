@@ -1,5 +1,7 @@
 # Climómetro MX
 
+**Producción: [climometro.vercel.app](https://climometro.vercel.app)**
+
 Sistema de riesgo climático-operativo para empresas en México, desarrollado por [Aleph](https://alephri.com). Pronóstico a 7 días para las principales zonas urbanas, corredores carreteros e instalaciones propias del usuario, con ciclones, sismos y crecidas en vivo.
 
 > El modo **Protestas** (Protestómetro) está desactivado temporalmente (`PRODUCT = 'clima'` en `index.html`); su código sigue intacto y se reactiva cambiando esa constante a `'dual'`.
