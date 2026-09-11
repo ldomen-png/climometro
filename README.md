@@ -10,7 +10,8 @@ Sistema de riesgo climático-operativo para empresas en México, desarrollado po
 - **Semáforo con atribución y acción**: cada zona/corredor/sitio indica su nivel, *qué variable lo disparó* (lluvia, viento, ráfagas, calor, visibilidad) y la acción que corresponde.
 - **Geocercas de afectación**: cada zona en amarillo o peor genera un área de 25–60 km según nivel — para el personal que anda disperso por territorio, no sobre una carretera — y el portal y el mensaje dicen qué activos quedaron dentro.
 - **Mis sitios**: el usuario agrega sus plantas/CEDIS con clic en el mapa (localStorage); cada sitio recibe pronóstico propio a 7 días, exposición histórica (CENAPRED + HURDAT2) y alerta si cae dentro del cono de un ciclón activo del NHC.
-- **Parte operativo**: botón que copia al portapapeles el resumen del día (sitios, zonas y corredores en rojo, ciclones, crecidas) listo para pegar en el chat del comité.
+- **Ficha PDF de una página** (MVP de entrega): botón "Descargar ficha PDF" en el Resumen — documento vectorial A4 con cabecera Aleph, veredicto nacional, las cuatro banderas regionales, mapa estático de Mapbox con pines de zonas en alerta e instalaciones, tabla de zonas con motivo y geocerca, corredores, riesgos activos y pie con fuentes y el descargo del SIAT-CT. Se genera en el navegador con jsPDF (sin backend) y descarga directa sin diálogo de impresión: un clic → archivo → adjuntar en Teams o WhatsApp. La lista de zonas se ajusta al espacio para que la ficha quepa en una hoja.
+- **Parte operativo en texto**: copia al portapapeles o abre WhatsApp con el resumen del día, para quien prefiera texto plano.
 - **Frescura y revalidación**: hora de descarga visible junto al headline; el semáforo se revalida cada 30 min y al volver a la pestaña.
 - **Exposición histórica por zona**: cada ZM muestra su índice de peligro de inundación (CENAPRED 2016) y cuántos ciclones cat. 3+ pasaron a <100 km desde 1980 (precomputado, embebido).
 

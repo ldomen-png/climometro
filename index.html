@@ -868,9 +868,12 @@ canvas.wind-raster{
             <div id="hl-regiones"></div>
             <div class="hl-text" id="hl-text">—</div>
             <div id="hl-fresh" style="font-size:9px;color:var(--text-dim);margin-top:8px;letter-spacing:0.03em;display:flex;align-items:center;gap:8px;flex-wrap:wrap"></div>
-            <div id="parte-btns" style="display:none;margin-top:10px;gap:6px" class="parte-row">
-              <button id="parte-btn" type="button" style="flex:1;padding:7px 10px;background:rgba(255,255,255,0.05);border:1px solid var(--border-strong);border-radius:5px;color:rgba(255,255,255,0.85);font-family:'Inter',sans-serif;font-size:11px;font-weight:600;cursor:pointer;letter-spacing:0.03em">⧉ Copiar parte del día</button>
-              <button id="parte-wa-btn" type="button" style="flex:1;padding:7px 10px;background:rgba(62,207,110,0.10);border:1px solid rgba(62,207,110,0.4);border-radius:5px;color:#7fdca4;font-family:'Inter',sans-serif;font-size:11px;font-weight:600;cursor:pointer;letter-spacing:0.03em">Enviar por WhatsApp</button>
+            <div id="parte-btns" style="display:none;margin-top:10px;flex-direction:column;gap:6px">
+              <button id="pdf-btn" type="button" style="width:100%;padding:9px 10px;background:var(--aleph-yellow);border:1px solid var(--aleph-yellow);border-radius:5px;color:#0a0a0a;font-family:'Inter',sans-serif;font-size:12px;font-weight:700;cursor:pointer;letter-spacing:0.02em">↓ Descargar ficha PDF</button>
+              <div style="display:flex;gap:6px">
+                <button id="parte-btn" type="button" style="flex:1;padding:7px 10px;background:rgba(255,255,255,0.05);border:1px solid var(--border-strong);border-radius:5px;color:rgba(255,255,255,0.85);font-family:'Inter',sans-serif;font-size:11px;font-weight:600;cursor:pointer;letter-spacing:0.03em">⧉ Copiar texto</button>
+                <button id="parte-wa-btn" type="button" style="flex:1;padding:7px 10px;background:rgba(62,207,110,0.10);border:1px solid rgba(62,207,110,0.4);border-radius:5px;color:#7fdca4;font-family:'Inter',sans-serif;font-size:11px;font-weight:600;cursor:pointer;letter-spacing:0.03em">WhatsApp</button>
+              </div>
             </div>
           </div>
           <div class="section">
@@ -1891,6 +1894,18 @@ function nivelDeZona(z){
   // puede no caer sobre el río correcto — mismo tope que en el corte.
   if(z._floodRatio) n = Math.max(n, 2);
   return n;
+}
+// Motivo legible del nivel de una zona: la razón física si hay, y si el nivel
+// lo puso el ciclón o la crecida, decirlo con sus datos — nunca un guion.
+function motivoDeZona(z){
+  const fis = (z._climaReasons && z._climaReasons[wk]) || [];
+  if(fis.length) return fis.join(' · ');
+  const st = siatForPoint(z.lat, z.lng);
+  if(st) return 'SIAT-CT ' + st.meta.name.split('·')[0].trim().toLowerCase()
+    + ' · ' + st.storm.name + ' a ' + st.distKm + ' km'
+    + (st.hours != null ? ' (~' + st.hours + ' h)' : '');
+  if(z._floodRatio) return 'crecida fluvial ' + z._floodRatio.toFixed(1) + '× la mediana mensual';
+  return '—';
 }
 function banderasPorRegion(){
   const niveles = {};
@@ -3439,6 +3454,265 @@ function renderAlertas(){
 }
 renderAlertas();
 
+// ════════════════════════════════════════════════════════════════════════
+// FICHA PDF — el entregable que el cliente reenvía por su cuenta
+// Documento vectorial de una página (A4), descarga directa sin diálogo de
+// impresión: un clic → archivo → adjuntar en Teams o WhatsApp. Sustituye el
+// hábito actual de pegar pantallazos en el chat.
+// ════════════════════════════════════════════════════════════════════════
+const PDF_M = 14;                 // margen (mm)
+const PDF_W = 210, PDF_H = 297;   // A4
+const PDF_CW = PDF_W - PDF_M * 2; // ancho útil
+const pdfTinte = (h, f) => {
+  const [r,g,b] = hex2rgb(h);
+  const m = v => Math.round(v + (255 - v) * f);
+  return '#' + [m(r),m(g),m(b)].map(v => v.toString(16).padStart(2,'0')).join('');
+};
+// Texto legible sobre un relleno: oscuro si el color es claro (amarillo/verde).
+const pdfSobre = h => {
+  const [r,g,b] = hex2rgb(h);
+  return (0.299*r + 0.587*g + 0.114*b) > 150 ? '#1c1a15' : '#ffffff';
+};
+const hex2rgb = h => {
+  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(h);
+  return m ? [parseInt(m[1],16), parseInt(m[2],16), parseInt(m[3],16)] : [0,0,0];
+};
+function cargarJsPDF(){
+  if(window.jspdf && window.jspdf.jsPDF) return Promise.resolve();
+  return new Promise((ok, err) => {
+    const sc = document.createElement('script');
+    sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/4.2.1/jspdf.umd.min.js';
+    sc.onload = ok;
+    sc.onerror = () => err(new Error('No se pudo cargar el generador de PDF'));
+    document.head.appendChild(sc);
+  });
+}
+// Mapa estático de Mapbox con pines de las zonas que exigen atención.
+async function mapaEstatico(){
+  const pines = [];
+  ZONAS.map(z => ({ z, n: nivelDeZona(z) })).filter(x => x.n >= 2)
+    .sort((a,b) => b.n - a.n).slice(0, 12)
+    .forEach(({z, n}) => pines.push('pin-s+'+NIVELES[n].mapa.replace('#','')+'('+z.lng.toFixed(3)+','+z.lat.toFixed(3)+')'));
+  sites.slice(0, 6).forEach((s, i) => pines.push('pin-l-1+1c1a15('+s.lng.toFixed(3)+','+s.lat.toFixed(3)+')'));
+  const vista = pines.length ? 'auto' : '-102.5,23.5,3.6';
+  const url = 'https://api.mapbox.com/styles/v1/mapbox/light-v11/static/'
+    + (pines.length ? pines.join(',') + '/' : '') + vista
+    + '/900x330@2x?padding=50&access_token=' + mapboxgl.accessToken;
+  try {
+    const r = await fetch(url);
+    if(!r.ok) throw new Error('static map '+r.status);
+    const blob = await r.blob();
+    return await new Promise(res => {
+      const fr = new FileReader();
+      fr.onload = () => res(fr.result);
+      fr.onerror = () => res(null);
+      fr.readAsDataURL(blob);
+    });
+  } catch(e){ console.warn('Mapa del PDF no disponible:', e); return null; }
+}
+async function generarFichaPDF(){
+  await cargarJsPDF();
+  const doc = new window.jspdf.jsPDF({ unit:'mm', format:'a4', compress:true });
+  const niveles = banderasPorRegion();
+  const tope = Math.max(...REGIONES_OPS.map(r => niveles[r]));
+  const M = NIVELES[tope];
+  const ahora = new Date();
+  const hhmm = String(ahora.getHours()).padStart(2,'0')+':'+String(ahora.getMinutes()).padStart(2,'0');
+  let y = 0;
+
+  const txt = (s, x, yy, o) => {
+    o = o || {};
+    doc.setFont('helvetica', o.bold ? 'bold' : 'normal');
+    doc.setFontSize(o.size || 9);
+    const c = hex2rgb(o.color || '#1c1a15');
+    doc.setTextColor(c[0], c[1], c[2]);
+    doc.text(String(s), x, yy, o.align ? { align:o.align } : undefined);
+  };
+  const caja = (x, yy, w, h, fill, stroke, r) => {
+    if(fill){ const f = hex2rgb(fill); doc.setFillColor(f[0],f[1],f[2]); }
+    if(stroke){ const st = hex2rgb(stroke); doc.setDrawColor(st[0],st[1],st[2]); doc.setLineWidth(0.4); }
+    const modo = fill && stroke ? 'FD' : fill ? 'F' : 'S';
+    if(r) doc.roundedRect(x, yy, w, h, r, r, modo); else doc.rect(x, yy, w, h, modo);
+  };
+  const regla = (yy) => { doc.setDrawColor(225,221,210); doc.setLineWidth(0.3); doc.line(PDF_M, yy, PDF_M+PDF_CW, yy); };
+  const asegurar = (h) => { if(y + h > PDF_H - 20){ doc.addPage(); y = PDF_M; } };
+  const titulo = (t) => {
+    asegurar(14);
+    y += 5;
+    txt(t.toUpperCase(), PDF_M, y, { size:7.5, bold:true, color:'#8a8578' });
+    y += 1.6; regla(y); y += 4.5;
+  };
+
+  // ── Cabecera ───────────────────────────────────────────────────────────
+  caja(0, 0, PDF_W, 20, '#1c1a15');
+  const logo = document.querySelector('.brand-logo-img');
+  if(logo && logo.src && logo.src.startsWith('data:')){
+    try { doc.addImage(logo.src, 'PNG', PDF_M, 6.4, 21, 7.2); } catch(e){ /* sin logo */ }
+  }
+  txt('CLIMÓMETRO', PDF_M + 25, 12.4, { size:12, bold:true, color:'#e4c249' });
+  txt('Parte operativo · riesgo climático', PDF_W - PDF_M, 9.6, { size:8, color:'#faf8f4', align:'right' });
+  txt((wk === 0 ? 'Corte ' + hhmm : 'Pronóstico') + ' · ' + fmtD(SEMANAS[wk]),
+      PDF_W - PDF_M, 14.4, { size:8, color:'#a39b8a', align:'right' });
+  y = 27;
+
+  // ── Veredicto nacional ─────────────────────────────────────────────────
+  caja(PDF_M, y, PDF_CW, 19, pdfTinte(M.color, 0.88), M.color, 1.5);
+  caja(PDF_M, y, 2.6, 19, M.color);
+  const veredicto = (tope > 0 ? 'ALERTA ' + M.flag : 'SIN ALERTA') + '  ·  ' + M.verbo;
+  txt(veredicto, PDF_M + 7, y + 7.8, { size:14, bold:true, color:'#1c1a15' });
+  doc.setFont('helvetica','normal'); doc.setFontSize(8);
+  doc.splitTextToSize(M.accion, PDF_CW - 14).slice(0, 2).forEach((ln, i) => {
+    txt(ln, PDF_M + 7, y + 13.6 + i * 3.6, { size:8, color:'#3a3630' });
+  });
+  y += 24;
+
+  // ── Banderas por región ────────────────────────────────────────────────
+  const bw = (PDF_CW - 9) / 4;
+  REGIONES_OPS.forEach((r, i) => {
+    const m = NIVELES[niveles[r]];
+    const x = PDF_M + i * (bw + 3);
+    caja(x, y, bw, 17, pdfTinte(m.color, 0.93), m.color, 1.2);
+    caja(x, y, bw, 4.8, m.color);
+    txt(r.toUpperCase(), x + bw/2, y + 3.4, { size:7, bold:true, color:pdfSobre(m.color), align:'center' });
+    txt(m.flag, x + bw/2, y + 10.4, { size:9.5, bold:true, color:'#1c1a15', align:'center' });
+    txt(m.verbo, x + bw/2, y + 14.5, { size:7, color:'#6f6a5e', align:'center' });
+  });
+  y += 22;
+
+  // ── Mapa ───────────────────────────────────────────────────────────────
+  const img = await mapaEstatico();
+  if(img){
+    const h = PDF_CW * (330/900);
+    asegurar(h + 6);
+    try {
+      doc.addImage(img, 'PNG', PDF_M, y, PDF_CW, h);
+      caja(PDF_M, y, PDF_CW, h, null, '#e3ddd0');
+      y += h + 2;
+      txt('Pines de color: zonas que exigen atención. Pines oscuros: tus instalaciones.',
+          PDF_M, y + 2, { size:6.5, color:'#8a8578' });
+      y += 5;
+    } catch(e){ /* si falla la imagen seguimos sin mapa */ }
+  }
+
+  // ── Mis sitios ─────────────────────────────────────────────────────────
+  if(sites.length){
+    titulo('Mis instalaciones');
+    sites.forEach((s, i) => {
+      asegurar(9);
+      const n = nivelSitio(i, s);
+      const r = siteRisk(i, wk);
+      const g = geocercaDeSitio(s);
+      caja(PDF_M, y - 2.6, 2, 6.4, NIVELES[n].mapa);
+      txt(s.name, PDF_M + 4, y, { size:9, bold:true });
+      caja(PDF_M + 64, y - 2.8, 22, 4.4, pdfTinte(NIVELES[n].mapa, 0.82), null, 0.8);
+      txt(NIVELES[n].flag, PDF_M + 75, y, { size:6.8, bold:true, color:'#1c1a15', align:'center' });
+      const det = (r && r.reasons.length ? r.reasons.join(' · ') : 'sin afectación propia prevista')
+        + (g ? ' · dentro de geocerca de ' + g.zona.zm + ' (' + g.km + ' km)' : '');
+      txt(doc.splitTextToSize(det, PDF_CW - 92)[0], PDF_M + 4 + 92, y, { size:7.5, color:'#6f6a5e' });
+      y += 7;
+    });
+  }
+
+  // ── Zonas que exigen atención ──────────────────────────────────────────
+  const zonasAtn = ZONAS.map(z => ({ z, n: nivelDeZona(z) })).filter(x => x.n >= 2)
+    .sort((a,b) => b.n - a.n);
+  let caben = 0;
+  titulo('Zonas que exigen atención (' + zonasAtn.length + ')');
+  if(!zonasAtn.length){
+    txt('Ninguna zona en amarillo o superior para este día.', PDF_M, y, { size:8, color:'#6f6a5e' });
+    y += 6;
+  } else {
+    // Cuántas zonas caben sin empujar corredores y riesgos a una segunda
+    // página casi vacía: la ficha debe ser un documento de una hoja.
+    const reserva = 48;
+    caben = Math.max(4, Math.floor((PDF_H - 20 - reserva - y) / 6.4));
+    zonasAtn.slice(0, caben).forEach(({z, n}) => {
+      asegurar(8);
+      const razones = motivoDeZona(z);
+      caja(PDF_M, y - 2.6, 2, 6.4, NIVELES[n].mapa);
+      txt(z.zm, PDF_M + 4, y, { size:8.5, bold:true });
+      caja(PDF_M + 64, y - 2.8, 22, 4.4, pdfTinte(NIVELES[n].mapa, 0.82), null, 0.8);
+      txt(NIVELES[n].flag, PDF_M + 75, y, { size:6.8, bold:true, color:'#1c1a15', align:'center' });
+      txt(doc.splitTextToSize(razones, PDF_CW - 96)[0], PDF_M + 92, y, { size:7.5, color:'#6f6a5e' });
+      if(n >= 2) txt('geocerca ' + GEOCERCA_KM[n] + ' km', PDF_M + PDF_CW, y, { size:7, color:'#8a8578', align:'right' });
+      y += 6.4;
+    });
+    if(zonasAtn.length > caben){
+      const resto = zonasAtn.length - caben;
+      txt('… y ' + resto + (resto === 1 ? ' zona más' : ' zonas más') + ' en el portal.', PDF_M, y + 1, { size:7.5, color:'#8a8578' });
+      y += 6;
+    }
+  }
+
+  // ── Corredores ─────────────────────────────────────────────────────────
+  if(corridorClimaLevels){
+    const corr = CORRIDORS.map((c, ci) => ({ c, n: corridorClimaLevels[ci][wk] || 0,
+      st: corridorClimaStats[ci][wk] || {rain:0,gust:0} })).filter(x => x.n >= 2)
+      .sort((a,b) => b.n - a.n || b.st.rain - a.st.rain);
+    titulo('Corredores carreteros afectados (' + corr.length + ')');
+    if(!corr.length){
+      txt('Sin corredores en amarillo o superior para este día.', PDF_M, y, { size:8, color:'#6f6a5e' });
+      y += 6;
+    } else corr.slice(0, 8).forEach(({c, n, st}) => {
+      asegurar(8);
+      caja(PDF_M, y - 2.6, 2, 6.4, NIVELES[n].mapa);
+      txt(c.id, PDF_M + 4, y, { size:8.5, bold:true });
+      txt(c.name, PDF_M + 18, y, { size:7.5, color:'#3a3630' });
+      const d = [st.rain >= 1 ? st.rain.toFixed(0)+' mm máx' : null,
+                 st.gust >= 30 ? 'ráfagas '+st.gust.toFixed(0)+' km/h' : null].filter(Boolean).join(' · ');
+      txt(d, PDF_M + PDF_CW, y, { size:7.5, color:'#6f6a5e', align:'right' });
+      y += 6.4;
+    });
+  }
+
+  // ── Riesgos activos ────────────────────────────────────────────────────
+  const riesgos = [];
+  (riskFeeds.storms || []).filter(stormNearMexico).forEach(s => {
+    const st = siatSummary();
+    riesgos.push((STORM_TYPE_ES[s.type] || 'Ciclón') + ' ' + s.name
+      + (s.maxwindKt ? ' · viento ' + ktToKmh(s.maxwindKt) + ' km/h' : '')
+      + ' · aviso #' + s.advisory + ' NHC'
+      + (st && st.best.meta.rank >= 3 ? ' · SIAT-CT estimado ' + st.best.meta.name : ''));
+  });
+  ZONAS.filter(z => z._floodRatio).slice(0, 4).forEach(z =>
+    riesgos.push('Crecida fluvial en ' + z.zm + ': ' + z._floodRatio.toFixed(1) + '× la mediana mensual (GloFAS)'));
+  if(riskFeeds.quakes && riskFeeds.quakes.features){
+    riskFeeds.quakes.features.filter(f => (f.properties.mag||0) >= 5).slice(0, 3).forEach(f =>
+      riesgos.push('Sismo M' + f.properties.mag.toFixed(1) + ' · ' + (f.properties.place || '') + ' (USGS, 48 h)'));
+  }
+  const enGeo = sitiosEnGeocerca();
+  if(enGeo.length) riesgos.push('Instalaciones dentro de geocercas de afectación: '
+    + enGeo.map(x => x.sitio.name).join(', ') + ' → suspender actividad en calle en esas áreas.');
+  if(riesgos.length){
+    titulo('Riesgos activos');
+    riesgos.forEach(r => {
+      asegurar(7);
+      doc.splitTextToSize('• ' + r, PDF_CW).slice(0, 2).forEach((ln, i) => {
+        txt(ln, PDF_M + (i ? 3 : 0), y, { size:8, color:'#3a3630' });
+        y += 4.4;
+      });
+      y += 0.8;
+    });
+  }
+
+  // ── Pie en cada página ─────────────────────────────────────────────────
+  const paginas = doc.getNumberOfPages();
+  for(let p = 1; p <= paginas; p++){
+    doc.setPage(p);
+    regla(PDF_H - 16);
+    txt('Fuentes: Open-Meteo (ECMWF/GFS/ICON) · NHC/NOAA · USGS · GloFAS/Copernicus · CONAGUA · CENAPRED.',
+        PDF_M, PDF_H - 12, { size:6.5, color:'#8a8578' });
+    txt('Los niveles SIAT-CT son estimaciones de apoyo de Aleph; la declaratoria oficial corresponde a Protección Civil.',
+        PDF_M, PDF_H - 9, { size:6.5, color:'#8a8578' });
+    txt('Aleph · alephri.com', PDF_M, PDF_H - 5.4, { size:7, bold:true, color:'#1c1a15' });
+    txt('Generado ' + fmtD(new Date().toISOString().slice(0,10)) + ' ' + hhmm + ' · pág. ' + p + '/' + paginas,
+        PDF_W - PDF_M, PDF_H - 5.4, { size:6.5, color:'#8a8578', align:'right' });
+  }
+
+  const f = SEMANAS[wk] || new Date().toISOString().slice(0,10);
+  doc.save('climometro-parte-' + f + '-' + hhmm.replace(':','') + '.pdf');
+}
+
 // ── Parte operativo (texto plano al portapapeles) ───────────────────────
 function buildParteOperativo(){
   const lines = ['CLIMÓMETRO · ' + fmtD(SEMANAS[wk]) + (wk === 0 ? ' (hoy)' : '')];
@@ -3467,7 +3741,7 @@ function buildParteOperativo(){
     lines.push('⚠ SIAT-CT estimado: ' + siatS.best.meta.name + ' en ' + siatS.count + ' zona' + (siatS.count>1?'s':'') + ' (' + siatS.best.storm.name + ') → ' + siatS.best.meta.action);
   }
   const redZones = ZONAS.filter(z => nivelDeZona(z) >= 3);
-  redZones.slice(0, 8).forEach(z => lines.push('🔴 ' + z.zm + ' — ' + (((z._climaReasons || [])[wk]) || []).join(', ')));
+  redZones.slice(0, 8).forEach(z => lines.push('🟠 ' + z.zm + ' — ' + motivoDeZona(z)));
   if(redZones.length > 8) lines.push('… y ' + (redZones.length - 8) + ' zonas más en disrupción alta');
   if(corridorClimaLevels){
     CORRIDORS.forEach((c, ci) => {
@@ -3497,6 +3771,21 @@ if(parteBtn) parteBtn.addEventListener('click', () => {
 });
 // Canal real del cliente: WhatsApp → reenvío a Teams. wa.me abre la app con
 // el parte prellenado; el usuario elige contacto/grupo y envía.
+const pdfBtn = document.getElementById('pdf-btn');
+if(pdfBtn) pdfBtn.addEventListener('click', async () => {
+  const original = pdfBtn.textContent;
+  pdfBtn.disabled = true;
+  pdfBtn.textContent = 'Generando ficha…';
+  try {
+    await generarFichaPDF();
+    pdfBtn.textContent = '✓ Ficha descargada';
+  } catch(e){
+    console.warn('Ficha PDF falló:', e);
+    pdfBtn.textContent = 'No se pudo generar — reintenta';
+  }
+  setTimeout(() => { pdfBtn.textContent = original; pdfBtn.disabled = false; }, 2600);
+});
+
 const parteWaBtn = document.getElementById('parte-wa-btn');
 if(parteWaBtn) parteWaBtn.addEventListener('click', () => {
   window.open('https://wa.me/?text=' + encodeURIComponent(buildParteOperativo()), '_blank', 'noopener');
