@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Acceso — Climómetro MX</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --aleph-yellow:#e4c249;
+  --bg-panel-solid:#1c1c1e;
+  --bg-input:rgba(20,20,22,0.85);
+  --border:rgba(255,255,255,0.10);
+  --border-strong:rgba(255,255,255,0.18);
+  --text-dim:rgba(255,255,255,0.55);
+  --red-text:#d97570;
+}
+*{box-sizing:border-box;}
+body{
+  margin:0;min-height:100dvh;display:flex;align-items:center;justify-content:center;
+  padding:24px;background:#0a0a0c;color:#fff;
+  font-family:'Inter',system-ui,sans-serif;
+  background-image:radial-gradient(ellipse 80% 60% at 50% -10%, rgba(228,194,73,0.10), transparent 70%);
+}
+.caja{width:100%;max-width:380px;}
+.marca{font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:var(--aleph-yellow);font-weight:600;margin-bottom:10px;}
+h1{font-size:26px;font-weight:600;margin:0 0 8px;letter-spacing:-0.02em;}
+.sub{font-size:13px;line-height:1.6;color:var(--text-dim);margin:0 0 22px;}
+label{display:block;font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:var(--text-dim);margin-bottom:6px;font-weight:500;}
+input{
+  width:100%;padding:12px 14px;background:var(--bg-input);
+  border:1px solid var(--border-strong);border-radius:8px;color:#fff;
+  font-family:inherit;font-size:15px;letter-spacing:0.02em;
+}
+input:focus{outline:2px solid var(--aleph-yellow);outline-offset:1px;border-color:transparent;}
+button{
+  width:100%;margin-top:12px;padding:12px;border:none;border-radius:8px;
+  background:var(--aleph-yellow);color:#0a0a0a;font-family:inherit;
+  font-size:14px;font-weight:600;cursor:pointer;
+}
+button:disabled{opacity:0.55;cursor:default;}
+button:focus-visible{outline:2px solid #fff;outline-offset:2px;}
+#msg{font-size:12.5px;line-height:1.5;margin-top:12px;min-height:18px;color:var(--red-text);}
+.pie{margin-top:26px;padding-top:16px;border-top:1px solid var(--border);font-size:11.5px;line-height:1.6;color:var(--text-dim);}
+.pie a{color:var(--aleph-yellow);text-decoration:none;}
+</style>
+</head>
+<body>
+<main class="caja">
+  <div class="marca">Aleph</div>
+  <h1>Climómetro MX</h1>
+  <p class="sub">Riesgo climático-operativo para México. El acceso es por código: usa el que te compartimos con tu organización.</p>
+  <form id="f" autocomplete="off">
+    <label for="codigo">Código de acceso</label>
+    <input id="codigo" name="codigo" type="password" required autofocus
+           autocapitalize="off" autocorrect="off" spellcheck="false"
+           aria-describedby="msg">
+    <button type="submit" id="go">Entrar</button>
+  </form>
+  <p id="msg" role="status" aria-live="polite"></p>
+  <div class="pie">¿No tienes código? Escríbenos a <a href="mailto:hola@alephri.com">hola@alephri.com</a>.</div>
+</main>
+<script>
+const f = document.getElementById('f'), msg = document.getElementById('msg'), go = document.getElementById('go');
+f.addEventListener('submit', async e => {
+  e.preventDefault();
+  const codigo = document.getElementById('codigo').value.trim();
+  if(!codigo) return;
+  go.disabled = true; go.textContent = 'Verificando…';
+  msg.style.color = 'var(--text-dim)'; msg.textContent = '';
+  try {
+    const r = await fetch('/api/entrar', {
+      method:'POST', headers:{'content-type':'application/json'},
+      body: JSON.stringify({ codigo })
+    });
+    const j = await r.json().catch(() => null);
+    if(r.ok && j && j.ok){ location.replace('/'); return; }
+    msg.style.color = 'var(--red-text)';
+    msg.textContent = (j && j.error) || 'No pudimos verificar el código.';
+  } catch(err){
+    msg.style.color = 'var(--red-text)';
+    msg.textContent = 'Sin conexión. Revisa tu red e intenta de nuevo.';
+  }
+  go.disabled = false; go.textContent = 'Entrar';
+});
+</script>
+</body>
+</html>

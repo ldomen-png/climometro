@@ -7,6 +7,11 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://api.mapbox.com/mapbox-gl-js/v3.8.0/mapbox-gl.css">
 <script src="https://api.mapbox.com/mapbox-gl-js/v3.8.0/mapbox-gl.js"></script>
+<!-- Vercel Web Analytics: sin cookies ni huella de navegador. Hay que
+     activarlo en Vercel → Project → Analytics; si no está activo el script
+     devuelve 404 y no pasa nada más. -->
+<script>window.va = window.va || function(){ (window.vaq = window.vaq || []).push(arguments); };</script>
+<script defer src="/_vercel/insights/script.js"></script>
 <style>
 /* ── ALEPH TOKENS ─────────────────────────────────────────── */
 :root{
@@ -377,6 +382,29 @@ html,body{height:100%;width:100%;overflow:hidden;font-family:'Inter',sans-serif;
   cursor:pointer;touch-action:manipulation;
 }
 .corr-zm:hover{background:rgba(228,194,73,0.18);border-color:rgba(228,194,73,0.4);}
+
+/* AVISO DE FUENTES CAÍDAS — un producto de alertas debe decir cuándo está ciego */
+.aviso-fuentes{
+  position:absolute;top:10px;left:50%;transform:translateX(-50%);
+  max-width:min(680px,calc(100vw - 24px));z-index:1200;
+  display:flex;align-items:center;gap:10px;
+  padding:9px 12px;border-radius:7px;
+  background:rgba(60,44,12,0.96);border:1px solid rgba(228,194,73,0.55);
+  color:#f5e6b8;font-size:12px;line-height:1.45;
+  box-shadow:0 6px 20px rgba(0,0,0,0.45);
+}
+.aviso-fuentes.critico{background:rgba(70,18,14,0.96);border-color:rgba(224,48,32,0.6);color:#ffd9d4;}
+.aviso-fuentes .af-icono{font-size:15px;flex-shrink:0;}
+.aviso-fuentes .af-btn{
+  margin-left:auto;flex-shrink:0;background:rgba(255,255,255,0.12);
+  border:1px solid rgba(255,255,255,0.28);color:inherit;
+  font-family:'Inter',sans-serif;font-size:11px;font-weight:600;
+  padding:5px 10px;border-radius:5px;cursor:pointer;
+}
+.aviso-fuentes .af-btn:hover{background:rgba(255,255,255,0.2);}
+@media(max-width:760px){
+  .aviso-fuentes{top:auto;bottom:calc(56px + env(safe-area-inset-bottom,0px) + 34px);font-size:11px;padding:8px 10px;}
+}
 
 /* BANDERAS POR REGIÓN (el semáforo, lo primero que se ve) */
 .reg-flags{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:2px 0 12px;}
@@ -767,6 +795,9 @@ canvas.wind-raster{
     box-shadow:0 -8px 24px rgba(0,0,0,0.5);
   }
   #panel.open{display:flex;}
+  /* Opaco en móvil: el mapa y el ticker se transparentaban detrás del texto. */
+  #panel{background:rgba(18,18,20,0.97);}
+  .list-hdr{background:rgba(18,18,20,0.99);}
 
   #panel-backdrop{
     display:none;
@@ -831,6 +862,13 @@ canvas.wind-raster{
         Open-Meteo (ECMWF/GFS/ICON, actualización horaria) · Ciclones NHC/NOAA (cada 3–6 h) · Sismos USGS (continuo) · Crecidas GloFAS/Copernicus (diario) · Históricos: CENAPRED 2016 y HURDAT2 1980–2025.
       </div>
     </div>
+    <div class="hm-section" id="hm-sesion" style="display:none">
+      <div class="hm-title">Sesión</div>
+      <div class="hm-body" style="font-size:11px;line-height:1.6">
+        <span id="hm-cliente"></span>
+        <a href="#" id="hm-salir" class="hm-link" style="display:block;margin-top:6px">Cerrar sesión →</a>
+      </div>
+    </div>
     <div class="hm-section">
       <a href="https://alephri.com" target="_blank" class="hm-link">Visitar Aleph →</a>
     </div>
@@ -888,7 +926,7 @@ canvas.wind-raster{
         </div>
         <div class="panel-body">
           <div class="headline">
-            <div class="hl-week" id="hl-week">ESTA SEMANA</div>
+            <div class="hl-week" id="hl-week">Cargando…</div>
             <div id="hl-regiones"></div>
             <div class="hl-text" id="hl-text">—</div>
             <div id="hl-corte" style="display:none;gap:6px;flex-wrap:wrap;font-size:10px;color:rgba(255,255,255,0.8);margin-top:8px;letter-spacing:0.02em"></div>
@@ -957,9 +995,17 @@ canvas.wind-raster{
         <div class="panel-body">
           <div class="section" style="padding-bottom:10px;">
             <div style="font-size:11px;color:rgba(255,255,255,0.6);line-height:1.5;">
-              Tus instalaciones con semáforo propio a 7 días, exposición histórica y alerta de ciclón. Guardadas en este navegador.
+              Tus instalaciones con semáforo propio a 7 días, exposición histórica y alerta de ciclón.
+              <b style="color:var(--aleph-yellow)">Se guardan solo en este navegador</b>: se pierden al limpiar datos del sitio
+              o al cambiar de equipo. Respalda el archivo para no volver a capturarlas.
             </div>
             <button id="site-add" class="site-add-btn" type="button">+ Agregar sitio (clic en el mapa)</button>
+            <div id="sites-io" style="display:flex;gap:6px;margin-top:6px">
+              <button id="sites-export" class="cl-toggle" type="button" style="flex:1;padding:6px;font-size:11px">↓ Respaldar</button>
+              <button id="sites-import" class="cl-toggle" type="button" style="flex:1;padding:6px;font-size:11px">↑ Restaurar</button>
+              <input id="sites-file" type="file" accept="application/json,.json" style="display:none">
+            </div>
+            <div id="sites-io-msg" style="font-size:10.5px;color:var(--text-dim);margin-top:6px;line-height:1.4"></div>
           </div>
           <div id="sites-list"></div>
           <div class="section">
@@ -1146,9 +1192,14 @@ canvas.wind-raster{
         </div>
         <div id="clima-fresh" class="cl-fresh">—</div>
       </div>
+      <div id="grid-cargando" style="display:none;position:absolute;bottom:96px;left:50%;transform:translateX(-50%);z-index:1200;align-items:center;gap:8px;padding:7px 12px;border-radius:6px;background:rgba(15,15,17,0.92);border:1px solid var(--border-strong);color:rgba(255,255,255,0.85);font-size:11px;box-shadow:0 4px 16px rgba(0,0,0,0.4)">
+        <span class="fh-pulse"></span><span>Descargando malla nacional de lluvia… puede tardar hasta un minuto</span>
+      </div>
+      <!-- Aviso persistente de fuentes caídas -->
+      <div id="aviso-fuentes" class="aviso-fuentes" style="display:none"></div>
       <!-- Mobile floating headline -->
       <div id="float-headline" role="status" aria-live="polite">
-        <div class="fh-week"><span class="fh-pulse"></span><span id="fh-week">ESTA SEMANA · 16 MAY 2026</span></div>
+        <div class="fh-week"><span class="fh-pulse"></span><span id="fh-week">Cargando…</span></div>
         <div class="fh-text" id="fh-text">—</div>
         <div id="fh-regiones"></div>
       </div>
@@ -1302,6 +1353,7 @@ function buildHeadline(weekIdx, compact){
 
   if(compact){
     // Mobile float: one-line summary with strong visual hierarchy.
+    if(isClima && climaSinDatos) return '<span class="hl-num" style="color:var(--text-dim)">Sin datos de pronóstico</span>';
     if(isClima){
       if(nivelTope === 0) return '<span class="hl-num green">Condiciones normales</span>';
       const m = NIVELES[nivelTope];
@@ -1311,7 +1363,7 @@ function buildHeadline(weekIdx, compact){
     }
     if(act.length === 0 && activeStorms.length === 0) return '<span class="hl-num green">Sin alertas activas</span>';
     if(act.length === 0 && activeStorms.length > 0){
-      return '<span class="hl-num red">'+activeStorms.length+'</span> ciclón'+(activeStorms.length>1?'es':'')+' activo'+(activeStorms.length>1?'s':'')+' cerca de México';
+      return '<span class="hl-num red">'+activeStorms.length+'</span> ciclon'+(activeStorms.length>1?'es':'ón')+' activo'+(activeStorms.length>1?'s':'')+' cerca de México';
     }
     let s = '<span class="hl-num red">'+act.length+'</span> zonas activas';
     if(weekIdx > 0){
@@ -1327,7 +1379,12 @@ function buildHeadline(weekIdx, compact){
   let html = '';
 
   // PRIMARY LINE — en clima lidera el nivel más alto presente, con su acción
-  if(isClima){
+  if(isClima && climaSinDatos){
+    html += '<div class="hl-primary"><span class="hl-num hl-big" style="color:var(--text-dim)">—</span>'
+      + '<span class="hl-label">sin datos de pronóstico</span></div>';
+    html += '<div class="hl-secondary" style="color:var(--text-dim)">No pudimos consultar la fuente meteorológica, '
+      + 'así que <b>no hay evaluación de riesgo</b> en esta pantalla. No tomes decisiones con lo que se muestra.</div>';
+  } else if(isClima){
     if(nivelTope === 0){
       html += '<div class="hl-primary"><span class="hl-num green hl-big">0</span><span class="hl-label">zonas en alerta</span></div>';
       html += '<div class="hl-secondary green">Condiciones normales.</div>';
@@ -1362,7 +1419,7 @@ function buildHeadline(weekIdx, compact){
   // CYCLONES LINE (clima) — presente incluso con 0 zonas en alerta
   if(activeStorms.length > 0){
     const names = activeStorms.map(s => s.name.split(' ').pop()).join(', ');
-    html += '<div class="hl-secondary"><span class="hl-num red">'+activeStorms.length+'</span> ciclón'+(activeStorms.length>1?'es':'')+' tropical'+(activeStorms.length>1?'es':'')+' activo'+(activeStorms.length>1?'s':'')+' ('+names+') · fuente NHC.</div>';
+    html += '<div class="hl-secondary"><span class="hl-num red">'+activeStorms.length+'</span> ciclon'+(activeStorms.length>1?'es':'ón')+' tropical'+(activeStorms.length>1?'es':'')+' activo'+(activeStorms.length>1?'s':'')+' ('+names+') · fuente NHC.</div>';
   }
   // SIAT-CT estimado (clima) — la bandera oficial de Protección Civil
   if(isClima){
@@ -1409,7 +1466,6 @@ let sel = null;
 // apagadas por defecto (la malla nacional ni se descarga hasta pedirla).
 let layerVis = {hex:true, corr:true, labels:true, geocercas:true, rain:false, cyclones:true, quakes:true, histflood:false, histtracks:false, histpuntos:false, histagua:false};
 let filterVis = {alert:true, historic:true, none:false};
-let corrTypeVis = {cuota:true, libre:true};
 let highlightedCorridors = new Set();
 
 // ── Mode switching (Protestas | Clima) ─────────────────────────────────
@@ -1417,6 +1473,61 @@ let highlightedCorridors = new Set();
 // en clima, oculta el toggle y suprime los ítems de protestas del ticker.
 // Volver a 'dual' reactiva el Protestómetro sin tocar nada más.
 const PRODUCT = 'clima';
+
+// ── ANALÍTICOS Y SESIÓN ─────────────────────────────────────────────────
+// Vercel Web Analytics: sin cookies, sin PII. Solo medimos QUÉ se usa, nunca
+// quién en lo individual: la única etiqueta de identidad es la organización
+// del código de acceso, que es la pregunta real ("¿lo está usando el cliente
+// o solo nosotros?"). Nombres de sitios, coordenadas y teléfonos jamás viajan.
+let sesionCliente = null;
+let sesionResuelta = false;
+// Los primeros eventos ocurren antes de que /api/quien conteste; si se mandan
+// tal cual quedan etiquetados como "anónimo" y el arranque —justo lo que más
+// interesa medir— pierde el cliente. Se encolan hasta saber quién es.
+const _colaEventos = [];
+function track(evento, datos){
+  if(!sesionResuelta){ _colaEventos.push([evento, datos]); return; }
+  try {
+    const d = Object.assign({ cliente: sesionCliente || 'anónimo',
+      movil: window.innerWidth < 768 ? 'si' : 'no' }, datos || {});
+    if(window.va) window.va('event', { name: evento, data: d });
+  } catch(e){}
+}
+function vaciarColaEventos(){
+  sesionResuelta = true;
+  while(_colaEventos.length) track(..._colaEventos.shift());
+}
+// Techo de espera: si /api/quien se cuelga, los eventos salen igual en vez de
+// quedarse en la cola para siempre.
+setTimeout(() => { if(!sesionResuelta) vaciarColaEventos(); }, 8000);
+// Una sola vez por sesión y por evento: sin esto, alternar una capa cinco
+// veces se vuelve cinco eventos y el embudo deja de decir nada.
+const _trackUnaVez = new Set();
+function trackUnaVez(evento, datos){
+  const k = evento + ':' + JSON.stringify(datos || {});
+  if(_trackUnaVez.has(k)) return;
+  _trackUnaVez.add(k);
+  track(evento, datos);
+}
+fetch('/api/quien').then(r => r.json()).then(j => {
+  if(!j || !j.ok) return;
+  sesionCliente = j.cliente || null;
+  if(!j.abierto && j.cliente){
+    const sec = document.getElementById('hm-sesion');
+    const nom = document.getElementById('hm-cliente');
+    if(sec && nom){
+      nom.textContent = j.cliente;
+      sec.style.display = '';
+      document.getElementById('hm-salir').onclick = async (e) => {
+        e.preventDefault();
+        try { await fetch('/api/salir', { method:'POST' }); } catch(err){}
+        location.replace('/acceso.html');
+      };
+    }
+  }
+  vaciarColaEventos();
+  track('portal_abierto');
+}).catch(() => { vaciarColaEventos(); track('portal_abierto'); });
 let mode = 'protestas';
 let weatherData = null;
 let weatherInflight = null;
@@ -1426,6 +1537,46 @@ let corridorRoutes = null;        // id → [[lng,lat],…] geometría real (OSR
 let corridorClimaLevels = null;   // [ci][dayIdx] → nivel 0/1/2 a lo largo del corredor
 let corridorClimaStats = null;    // [ci][dayIdx] → {rain, gust} máximos del corredor
 let riskFeeds = { storms:null, quakes:null, floodReady:false, inflight:null };
+// ── ESTADO DE LAS FUENTES ───────────────────────────────────────────────
+// Un producto de alertas tiene que distinguir "no hay alerta" de "no sé".
+// Aquí vive lo que sabemos de cada fuente; la UI lo muestra y el PDF lo sella.
+const FUENTES = {
+  pronostico: { nombre:'Pronóstico (Open-Meteo)', ok:null, critica:true },
+  corredores: { nombre:'Corredores', ok:null, critica:false },
+  malla:      { nombre:'Malla de lluvia', ok:null, critica:false },
+  ciclones:   { nombre:'Ciclones (NHC)', ok:null, critica:false },
+  sismos:     { nombre:'Sismos (USGS)', ok:null, critica:false },
+  crecidas:   { nombre:'Crecidas (GloFAS)', ok:null, critica:false },
+  sitios:     { nombre:'Pronóstico de tus sitios', ok:null, critica:false }
+};
+function marcarFuente(id, ok){
+  if(FUENTES[id]) FUENTES[id].ok = ok;
+  // Una fuente caída es tan interesante para nosotros como para el usuario:
+  // sin esto solo nos enteramos cuando alguien se queja.
+  if(ok === false) trackUnaVez('fuente_caida', { fuente: id });
+  renderAvisoFuentes();
+}
+function fuentesCaidas(){
+  return Object.entries(FUENTES).filter(([,f]) => f.ok === false).map(([id,f]) => ({ id, ...f }));
+}
+// Franja persistente: mientras una fuente esté caída, se dice en pantalla.
+function renderAvisoFuentes(){
+  const el = document.getElementById('aviso-fuentes');
+  if(!el) return;
+  const caidas = fuentesCaidas();
+  if(mode !== 'clima' || !caidas.length){ el.style.display = 'none'; return; }
+  const critica = caidas.some(f => f.critica);
+  el.style.display = 'flex';
+  el.className = 'aviso-fuentes' + (critica ? ' critico' : '');
+  el.innerHTML = '<span class="af-icono">⚠</span><span>'
+    + (critica
+        ? '<b>Sin pronóstico.</b> No podemos calcular el semáforo: lo que ves no es una evaluación de riesgo.'
+        : '<b>Datos incompletos.</b> No respondió: ' + caidas.map(f => escHTML(f.nombre)).join(', ')
+          + '. El semáforo puede estar subestimando el riesgo.')
+    + '</span><button type="button" id="aviso-reintentar" class="af-btn">Reintentar</button>';
+  const btn = document.getElementById('aviso-reintentar');
+  if(btn) btn.onclick = () => { btn.textContent = 'Reintentando…'; revalidateClima(true); };
+}
 let gridWeatherData = null;
 let gridWeatherInflight = null;
 let gridWeatherFetchedAt = null;
@@ -1736,8 +1887,13 @@ const PLAYBOOK = {
     visibilidad: 'Confirma visibilidad en ruta antes de salidas de madrugada.'
   }
 };
+// El playbook es por causa física, pero un nivel puede venir del ciclón
+// (SIAT) o de una geocerca, donde no hay `cat`. Antes devolvía null y la
+// tarjeta se quedaba sin acción justo en naranja y rojo, que es cuando más
+// importa: si no hay entrada por causa, cae a la acción del nivel.
 function playbookFor(level, cat){
-  return (PLAYBOOK[level] && PLAYBOOK[level][cat]) || null;
+  return (PLAYBOOK[level] && PLAYBOOK[level][cat])
+      || (NIVELES[level] && level > 0 ? NIVELES[level].accion : null);
 }
 function climaLevelFromDay(rainMm, windKmh, gustKmh, tmaxC, code){
   return climaDayRisk(rainMm, windKmh, gustKmh, tmaxC, code).level;
@@ -1747,6 +1903,10 @@ function climaLevelFromDay(rainMm, windKmh, gustKmh, tmaxC, code){
 // viento. Pinta las capas al terminar, respetando los toggles vigentes.
 function ensureGrid(){
   if(gridWeatherData){ _pintarGrid(); return Promise.resolve(gridWeatherData); }
+  // La malla tarda decenas de segundos y Open-Meteo puede devolver 429: sin
+  // este aviso el usuario enciende la capa y cree que la app se colgó.
+  const aviso = document.getElementById('grid-cargando');
+  if(aviso) aviso.style.display = 'flex';
   const p = loadGridWeather((info) => {
     if(info.phase === 'fetch') gridLoadStatus = 'lote '+info.current+'/'+info.total;
     else if(info.phase === 'fill') gridLoadStatus = 'rellenando '+info.current+'/'+info.total;
@@ -1754,7 +1914,10 @@ function ensureGrid(){
   });
   p.then(grid => {
     gridLoadStatus = null;
+    const av = document.getElementById('grid-cargando');
+    if(av) av.style.display = 'none';
     if(grid) gridCoveragePct = Math.round(grid.length / generateMexicoGrid().length * 100);
+    marcarFuente('malla', !!(grid && grid.length));
     _pintarGrid();
     updateClimaFreshness();
   });
@@ -1780,11 +1943,20 @@ function loadWeather(){
   const url = 'https://api.open-meteo.com/v1/forecast?latitude='+lats+'&longitude='+lngs
     +'&daily=precipitation_sum,precipitation_probability_max,wind_speed_10m_max,wind_gusts_10m_max,temperature_2m_max,weather_code'
     +'&timezone=America%2FMexico_City&forecast_days=7';
-  weatherInflight = fetch(url).then(r=>r.json()).then(data => {
+  weatherInflight = fetch(url).then(r => {
+    if(!r.ok) throw new Error('Open-Meteo '+r.status);
+    return r.json();
+  }).then(data => {
     weatherData = Array.isArray(data) ? data : [data];
     weatherInflight = null;
+    marcarFuente('pronostico', true);
     return weatherData;
-  }).catch(e => { console.warn('Open-Meteo failed:', e); weatherInflight = null; return null; });
+  }).catch(e => {
+    console.warn('Open-Meteo failed:', e);
+    weatherInflight = null;
+    marcarFuente('pronostico', false);
+    return null;
+  });
   return weatherInflight;
 }
 function loadCorridorWeather(){
@@ -1806,8 +1978,14 @@ function loadCorridorWeather(){
       corridorWeatherData[w.ci][w.pi] = (fc && fc.daily) ? fc.daily : null;
     });
     corridorWeatherInflight = null;
+    marcarFuente('corredores', true);
     return corridorWeatherData;
-  }).catch(e => { console.warn('Corridor weather failed:', e); corridorWeatherInflight = null; return null; });
+  }).catch(e => {
+    console.warn('Corridor weather failed:', e);
+    corridorWeatherInflight = null;
+    marcarFuente('corredores', false);
+    return null;
+  });
   return corridorWeatherInflight;
 }
 // Colapsa el pronóstico por waypoint a un nivel de semáforo por corredor/día,
@@ -1932,12 +2110,22 @@ const REGION_DE_ESTADO = (() => {
 // ignora el ciclón y la crecida y desalinea el mapa contra la lista.
 function nivelDeZonaEnDia(z, di){
   let n = Math.min(3, (z.semanas[di] || 0));
+  // El SIAT describe el aviso vigente y su horizonte: vale desde hoy hasta el
+  // día del acercamiento máximo. Pintarlo también en los días posteriores
+  // afirmaría que el ciclón sigue ahí cuando ya habrá pasado.
   const s = siatForPoint(z.lat, z.lng);
-  if(s) n = Math.max(n, SIAT_A_NIVEL[s.code] || 0);
-  // Crecida fluvial: amarillo (preparación). No más, porque el píxel de GloFAS
-  // puede no caer sobre el río correcto — mismo tope que en el corte.
-  if(z._floodRatio) n = Math.max(n, 2);
+  if(s && di <= siatDiasVigencia(s)) n = Math.max(n, SIAT_A_NIVEL[s.code] || 0);
+  // Crecida fluvial: amarillo (preparación) y solo el día que GloFAS marca.
+  // No más, porque el píxel de ~5 km puede no caer sobre el río correcto —
+  // mismo tope que en el corte.
+  if(z._floodDaily ? z._floodDaily[di] : z._floodRatio) n = Math.max(n, 2);
   return n;
+}
+// Último día del pronóstico al que alcanza el aviso de ciclón. Sin hora de
+// acercamiento (fase de alejamiento) vale solo hoy.
+function siatDiasVigencia(s){
+  if(s.hours == null) return 0;
+  return Math.min(6, Math.ceil(s.hours / 24));
 }
 const nivelDeZona = z => nivelDeZonaEnDia(z, wk);
 // Motivo legible del nivel de una zona: la razón física si hay, y si el nivel
@@ -1946,11 +2134,21 @@ function motivoDeZona(z){
   const fis = (z._climaReasons && z._climaReasons[wk]) || [];
   if(fis.length) return fis.join(' · ');
   const st = siatForPoint(z.lat, z.lng);
-  if(st) return 'SIAT-CT ' + st.meta.name.split('·')[0].trim().toLowerCase()
-    + ' · ' + st.storm.name + ' a ' + st.distKm + ' km'
-    + (st.hours != null ? ' (~' + st.hours + ' h)' : '');
-  if(z._floodRatio) return 'crecida fluvial ' + z._floodRatio.toFixed(1) + '× la mediana mensual';
+  if(st && wk <= siatDiasVigencia(st))
+    return 'SIAT-CT ' + st.meta.name.split('·')[0].trim().toLowerCase()
+      + ' · ' + st.storm.name + ' a ' + st.distKm + ' km'
+      + (st.hours != null ? ' (~' + st.hours + ' h)' : '');
+  // El motivo tiene que ser el del día que se está viendo, no el del pico
+  // de la semana: si no hay crecida hoy, no se puede decir que la hay.
+  const fr = z._floodDaily ? z._floodDaily[wk] : z._floodRatio;
+  if(fr) return 'crecida fluvial ' + fr.toFixed(1) + '× la mediana mensual';
   return '—';
+}
+// Peor bandera del país en el día visible: la etiqueta con la que vale la
+// pena leer los analíticos (¿descargan la ficha solo en naranja, o a diario?).
+function nivelNacional(){
+  const n = banderasPorRegion();
+  return NIVELES[Math.max(0, ...Object.values(n))].flag;
 }
 function banderasPorRegion(){
   const niveles = {};
@@ -2014,8 +2212,10 @@ function sitiosEnGeocerca(){
   });
   return dentro;
 }
+// Devuelve -1 cuando no hay pronóstico del sitio: "no sé" ≠ "sin alerta".
 function nivelSitio(i, s){
   const r = siteRisk(i, wk);
+  if(!r && !siatForPoint(s.lat, s.lng) && !geocercaDeSitio(s)) return -1;
   let n = r ? Math.min(3, r.level) : 0;
   const st = siatForPoint(s.lat, s.lng);
   if(st) n = Math.max(n, SIAT_A_NIVEL[st.code] || 0);
@@ -2155,14 +2355,19 @@ async function loadFlood(){
       const past = dis.slice(0, 31).filter(v => v != null).sort((a,b) => a-b);
       if(past.length < 10) return;
       const median = past[Math.floor(past.length/2)];
-      const future = dis.slice(31).filter(v => v != null);
-      const fmax = Math.max(...future, 0);
+      // GloFAS ya viene por día: guardamos la razón día a día en lugar de
+      // pintar los 7 días con el pico. Antes una crecida del viernes teñía
+      // de amarillo el lunes, que es afirmar algo que el dato no dice.
+      const future = dis.slice(31, 38);
+      const fmax = Math.max(...future.filter(v => v != null), 0);
       // Señal solo con caudal real (>5 m³/s) y anomalía fuerte (≥2× mediana)
       if(median > 0.5 && fmax > 5 && fmax / median >= 2){
         z._floodRatio = fmax / median;
         z._floodMax = fmax;
+        z._floodDaily = future.map(v =>
+          (v != null && v > 5 && v / median >= 2) ? v / median : 0);
       } else {
-        delete z._floodRatio; delete z._floodMax;
+        delete z._floodRatio; delete z._floodMax; delete z._floodDaily;
       }
     });
     return true;
@@ -2176,19 +2381,22 @@ function loadRiskFeeds(){
   riskFeeds.inflight = Promise.all([
     loadHurricanes().then(storms => {
       riskFeeds.storms = storms;
+      marcarFuente('ciclones', true);
       if(mapReady) refreshRiskLayers();
       renderTicker();
       if(mode === 'clima'){ renderAll(); renderSitesPanel(); }
       return storms;
-    }).catch(e => { console.warn('NHC failed:', e); return null; }),
+    }).catch(e => { console.warn('NHC failed:', e); marcarFuente('ciclones', false); return null; }),
     loadQuakes().then(q => {
       riskFeeds.quakes = q;
+      marcarFuente('sismos', q !== null);
       if(mapReady) refreshRiskLayers();
       renderTicker();
       return q;
     }),
     loadFlood().then(ok => {
       riskFeeds.floodReady = !!ok;
+      marcarFuente('crecidas', !!ok);
       renderTicker();
       if(sel && mode === 'clima') showDet(sel);
       return ok;
@@ -2406,9 +2614,10 @@ async function loadSiteWeather(){
       if(nowKey !== key) return loadSiteWeather();
       siteWeather = Array.isArray(d) ? d : [d];
       siteWeatherFor = key;
+      marcarFuente('sitios', true);
       return siteWeather;
     } catch(e){
-      if(attempt === 5){ console.warn('Pronóstico de sitios falló:', e); }
+      if(attempt === 5){ console.warn('Pronóstico de sitios falló:', e); marcarFuente('sitios', false); }
       else await new Promise(res => setTimeout(res, 1500 * Math.pow(1.8, attempt)));
     }
   }
@@ -2496,7 +2705,7 @@ function sitesFC(){
     features: sites.map((s, i) => {
       return {
         type: 'Feature',
-        properties: { id: s.id, name: s.name, level: nivelSitio(i, s), idx: i },
+        properties: { id: s.id, name: s.name, level: Math.max(0, nivelSitio(i, s)), sinDato: nivelSitio(i, s) < 0, idx: i },
         geometry: { type: 'Point', coordinates: [s.lng, s.lat] }
       };
     })
@@ -2518,6 +2727,7 @@ async function initSites(){
   refreshSitesLayer();
 }
 function startAddSite(){
+  track('sitio_alta_iniciada', { sitios: sites.length });
   addingSite = !addingSite;
   const btn = document.getElementById('site-add');
   if(btn){
@@ -2554,6 +2764,7 @@ window.renameSite = function(id, name){
 function renderSitesPanel(){
   const el = document.getElementById('sites-list');
   if(!el) return;
+  sitiosIOVisible();
   if(!sites.length){
     el.innerHTML = '<div style="padding:16px;font-size:12px;color:var(--text-dim);line-height:1.6">'
       + 'Agrega tus plantas, CEDIS u oficinas para verlas con su propio semáforo de 7 días, '
@@ -2565,7 +2776,8 @@ function renderSitesPanel(){
   el.innerHTML = sites.map((s, i) => {
     const today = siteRisk(i, wk);
     const lvl = nivelSitio(i, s);
-    const [lbl, col] = lvlMeta(lvl);
+    const sinDato = lvl < 0;
+    const [lbl, col] = sinDato ? ['SIN DATO', '#8a8578'] : lvlMeta(lvl);
     const days = SEMANAS.map((d, di) => {
       const r = siteRisk(i, di);
       const v = r ? r.level : 0;
@@ -2573,7 +2785,8 @@ function renderSitesPanel(){
       const why = (r && r.reasons.length) ? ' · ' + r.reasons.join(', ') : '';
       return '<div class="site-day'+(di===wk?' on':'')+'" style="background:'+c+'" onclick="jmpW('+di+')" title="'+fmtD(d)+why+'"></div>';
     }).join('');
-    const reasons = (today && today.reasons.length) ? today.reasons.join(' · ') : 'sin alerta propia';
+    const reasons = sinDato ? 'no pudimos consultar el pronóstico de este sitio'
+      : ((today && today.reasons.length) ? today.reasons.join(' · ') : 'sin alerta propia');
     const action = today ? playbookFor(today.level, today.cat) : null;
     const hist = siteHistContext(s);
     const histParts = [];
@@ -2639,8 +2852,8 @@ function estadoDelCorte(){
   const niveles = banderasPorRegion();
   const tope = Math.max(...REGIONES_OPS.map(r => niveles[r]));
   const cortes = tope >= 3 ? CORTES_ALERTA : CORTES_NORMAL;
-  const ahora = new Date();
-  const hhmm = String(ahora.getHours()).padStart(2,'0')+':'+String(ahora.getMinutes()).padStart(2,'0');
+  // Hora de CDMX, no la del navegador: en Tijuana los horarios salían mal.
+  const hhmm = new Intl.DateTimeFormat('es-MX', { timeZone:'America/Mexico_City', hour:'2-digit', minute:'2-digit', hour12:false }).format(new Date());
   const pasados = cortes.filter(c => c <= hhmm);
   const prox = cortes.find(c => c > hhmm);
   return {
@@ -2655,10 +2868,9 @@ function renderEstadoCorte(){
   if(mode !== 'clima'){ el.style.display = 'none'; return; }
   const c = estadoDelCorte();
   el.style.display = 'flex';
-  el.innerHTML = '<span style="color:var(--aleph-yellow);font-weight:600">'
-    + (c.ultimo ? 'Último corte '+c.ultimo : 'Primer corte '+CORTES_NORMAL[0])
-    + '</span><span style="color:var(--text-dim)">·</span><span>Próximo '+c.proximo+'</span>'
-    + (c.enAlerta ? '<span style="color:'+NIVELES[3].color+'">· cadencia de alerta</span>' : '');
+  el.innerHTML = '<span style="color:var(--text-dim)">Cadencia prevista del servicio (aún no operando):</span>'
+    + '<span style="color:rgba(255,255,255,0.8)">'+CORTES_NORMAL.join(' · ')+'</span>'
+    + (c.enAlerta ? '<span style="color:'+NIVELES[3].color+'">· sube con alerta activa</span>' : '');
 }
 function updateClimaFreshness(){
   const parts = [];
@@ -2682,14 +2894,14 @@ function updateClimaFreshness(){
 // Acknowledge → Inform → Estimate → Engage → Brand. The fact rotation makes
 // the 25-30 s wait feel like a methodology pitch rather than dead air.
 const CLIMA_FACTS = [
-  '660 celdas de pronóstico · de Tijuana al norte a Tapachula al sur.',
+  'Cobertura nacional: 79 zonas metropolitanas y 30 corredores carreteros.',
   'Modelos: ECMWF IFS 9 km + GFS 13 km + ICON · actualizados cada hora por Open-Meteo.',
   'Lluvia, ráfagas, calor extremo y condición del cielo alimentan el semáforo logístico.',
   'Ciclones tropicales en vivo: cono y trayectoria oficiales del NHC/NOAA, ambas cuencas.',
   'Sismos M4.5+ de las últimas 48 h vía USGS · crecidas fluviales vía GloFAS (Copernicus).',
   'Cada zona indica no solo el nivel sino QUÉ variable lo disparó: lluvia, ráfagas, calor o visibilidad.',
   'Agrega tus plantas y CEDIS en "Mis sitios" para verlos con semáforo propio y alertas de ciclón.',
-  'Aleph cruza este feed con el monitoreo semanal de protestas · una sola vista de riesgo operativo.',
+  'Aleph cruza clima, ciclones, sismos y crecidas en una sola vista de riesgo operativo.',
   '30 corredores federales con pronóstico propio punto a punto — 95D, 150D, 57D, 200, AN…'
 ];
 const climaLoader = {
@@ -2711,13 +2923,12 @@ const climaLoader = {
     if(this.factTimer) clearInterval(this.factTimer);
     this.factTimer = setInterval(() => this._cycleFact(), 4500);
   },
-  hide(){
+  hide(conError){
     const el = document.getElementById('clima-loader');
     if(!el) return;
     if(this.factTimer){ clearInterval(this.factTimer); this.factTimer = null; }
-    // Brief "done" state before fading so the user reads completion
-    this.setPhase('Listo');
-    this.setProgress(1, 1);
+    // Tras un error NO se dice "Listo": eso daba la impresión de que todo cargó.
+    if(!conError){ this.setPhase('Listo'); this.setProgress(1, 1); }
     el.classList.add('fading');
     setTimeout(() => {
       el.classList.remove('on', 'fading');
@@ -2806,7 +3017,8 @@ function applyZonaCirclePaint(){
   if(!mapReady || !map.getLayer('zonas-circle')) return;
   if(mode === 'clima'){
     map.setPaintProperty('zonas-circle', 'circle-color',
-      ['match', ['get','level'], 4, NIVELES[4].mapa, 3, NIVELES[3].mapa, 2, NIVELES[2].mapa, 1, NIVELES[1].mapa, NIVELES[0].mapa]);
+      ['case', ['get','sinDato'], '#8a8578',
+        ['match', ['get','level'], 4, NIVELES[4].mapa, 3, NIVELES[3].mapa, 2, NIVELES[2].mapa, 1, NIVELES[1].mapa, NIVELES[0].mapa]]);
     map.setPaintProperty('zonas-circle', 'circle-radius',
       ['match', ['get','level'], 4, 9, 3, 8, 2, 6, 1, 4.5, 3.5]);
     map.setPaintProperty('zonas-circle', 'circle-opacity', 0.95);
@@ -3038,10 +3250,38 @@ const WindOverlay = {
 // Convierte la respuesta de Open-Meteo en semáforo por zona y fechas del
 // pronóstico. Compartido entre la entrada a modo clima y la revalidación.
 let climaFetchedAt = null;
+let climaSinDatos = true;   // true hasta que haya un pronóstico real en memoria
+
+// Deja el estado de clima en blanco: sin niveles heredados del Protestómetro
+// y con las 7 fechas reales, para que la UI no muestre mayo de 2026.
+function entrarSinDatos(inicial){
+  climaSinDatos = true;
+  ZONAS.forEach(z => {
+    z.semanas = [0,0,0,0,0,0,0];
+    ['_climaRain','_climaWind','_climaGust','_climaTmax','_climaProb','_climaCode','_climaReasons','_climaCat','_floodRatio','_floodMax','_floodDaily']
+      .forEach(k => delete z[k]);
+    z.sinDato = true;
+  });
+  corridorClimaLevels = null;
+  corridorClimaStats = null;
+  // wk venía del índice de la serie de protestas (17): con solo 7 fechas
+  // quedaba fuera de rango y reventaba todo render que use SEMANAS[wk].
+  wk = 0;
+  SEMANAS.length = 0;
+  const hoy = new Date();
+  for(let i = 0; i < 7; i++){
+    const d = new Date(hoy); d.setDate(d.getDate() + i);
+    SEMANAS.push(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'));
+  }
+  if(!inicial) recomputeZMStats();
+}
 function processClimaZones(data){
   ZONAS.forEach((z, i) => {
     const fc = data[i];
-    if(!fc || !fc.daily){ z.semanas = [0,0,0,0,0,0,0]; return; }
+    // Una zona sin respuesta NO es una zona sin alerta: se marca como sin dato
+    // y se pinta en gris, nunca en verde.
+    if(!fc || !fc.daily){ z.semanas = [0,0,0,0,0,0,0]; z.sinDato = true; return; }
+    z.sinDato = false;
     const rain = fc.daily.precipitation_sum || [];
     const wind = fc.daily.wind_speed_10m_max || [];
     const gust = fc.daily.wind_gusts_10m_max || [];
@@ -3073,16 +3313,23 @@ function processClimaZones(data){
     }
   }
   climaFetchedAt = Date.now();
+  climaSinDatos = false;
 }
 // Revalidación silenciosa: Open-Meteo corre cada hora; una pestaña abierta no
 // debe servir el pronóstico de ayer. Refresca semáforo y corredores sin tocar
 // la malla (esa se renueva por día vía su cache) ni resetear el día visto.
-async function revalidateClima(){
+async function revalidateClima(manual){
   if(mode !== 'clima') return;
+  if(manual){
+    riskFeeds = { storms:null, quakes:null, floodReady:false, inflight:null };
+    Object.keys(FUENTES).forEach(k => { FUENTES[k].ok = null; });
+    gridWeatherData = null;
+    loadRiskFeeds();
+  }
   weatherData = null; weatherInflight = null;
   corridorWeatherData = null; corridorWeatherInflight = null;
   const [data] = await Promise.all([loadWeather(), loadCorridorWeather()]);
-  if(!data) return;
+  if(!data){ renderAvisoFuentes(); return; }
   computeCorridorClimaLevels();
   const keepDay = SEMANAS[wk];
   processClimaZones(data);
@@ -3123,11 +3370,20 @@ async function setMode(newMode){
     // riesgo (NHC, USGS, GloFAS) van a otros dominios y arrancan de inmediato.
     loadRiskFeeds();
     ensureHistData('histpuntos'); // datos ligeros: alimentan detalle de zona y sitios
+    // El copy de clima se aplica ANTES del await: si el fetch falla, la UI no
+    // puede quedarse con textos ni fechas del Protestómetro a la vista.
+    entrarSinDatos(true);
+    applyHistoricoCopy();
+    renderAll();
     const [data] = await Promise.all([loadWeather(), loadCorridorWeather()]);
     if(!data){
-      document.getElementById('hl-text').innerHTML = '<div class="hl-secondary" style="color:var(--red)">No se pudo cargar el pronóstico. Reintenta.</div>';
-      climaLoader.setPhase('Error de red — reintenta');
-      setTimeout(() => climaLoader.hide(), 1500);
+      // Sin pronóstico no hay semáforo. Jamás mostrar datos viejos como si
+      // fueran una evaluación de riesgo: el estado se queda en "sin datos".
+      climaLoader.setPhase('Sin conexión con el pronóstico');
+      setTimeout(() => climaLoader.hide(true), 1200);
+      applyHistoricoCopy();
+      renderAll();
+      renderAvisoFuentes();
       return;
     }
     computeCorridorClimaLevels();
@@ -3179,7 +3435,7 @@ async function setMode(newMode){
   if(mode === 'clima'){
     climaLoader.setPhase('Semáforo listo');
     climaLoader.setProgress(1, 1);
-    setTimeout(() => climaLoader.hide(), 350);
+    setTimeout(() => climaLoader.hide(false), 350);
   }
 }
 
@@ -3470,6 +3726,7 @@ function applyHistoricoCopy(){
 }
 
 function switchPanel(name){
+  trackUnaVez('panel_abierto', { panel: name });
   const panel = document.getElementById('panel');
   if(activePanel === name && panel.classList.contains('open')){
     panel.classList.remove('open');
@@ -3504,11 +3761,91 @@ if(windBtn) windBtn.addEventListener('click', toggleWindLayer);
 const siteAddBtn = document.getElementById('site-add');
 if(siteAddBtn) siteAddBtn.addEventListener('click', startAddSite);
 
+// ── RESPALDO DE SITIOS ──────────────────────────────────────────────────
+// Los sitios viven en localStorage y ahí se pierden con un "borrar datos del
+// sitio", un equipo nuevo o una ventana privada. Capturar veinte plantas a
+// mano dos veces no es aceptable, y todavía no hay dónde guardarlas del lado
+// del servidor: mientras tanto, un archivo que el usuario controla.
+function sitiosIOVisible(){
+  // Restaurar tiene que estar disponible precisamente cuando hay cero sitios:
+  // es el momento en que alguien acaba de perderlos. Solo se oculta el
+  // respaldo, que sin nada que guardar no hace nada.
+  const io = document.getElementById('sites-io');
+  const ex = document.getElementById('sites-export');
+  if(io) io.style.display = 'flex';
+  if(ex) ex.style.display = sites.length ? '' : 'none';
+}
+function sitiosIOMsg(txt, color){
+  const m = document.getElementById('sites-io-msg');
+  if(!m) return;
+  m.textContent = txt;
+  m.style.color = color || 'var(--text-dim)';
+  if(txt) setTimeout(() => { if(m.textContent === txt) m.textContent = ''; }, 6000);
+}
+const sitiosExportBtn = document.getElementById('sites-export');
+if(sitiosExportBtn) sitiosExportBtn.addEventListener('click', () => {
+  const blob = new Blob([JSON.stringify({
+    formato: 'climometro-sitios', version: 1,
+    exportado: new Date().toISOString(),
+    sitios: sites.map(s => ({ name: s.name, lat: s.lat, lng: s.lng }))
+  }, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'climometro-sitios-' + new Date().toISOString().slice(0,10) + '.json';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  sitiosIOMsg('Respaldo descargado: ' + sites.length + ' sitio' + (sites.length>1?'s':'') + '.');
+  track('sitios_respaldo', { n: sites.length });
+});
+const sitiosImportBtn = document.getElementById('sites-import');
+const sitiosFile = document.getElementById('sites-file');
+if(sitiosImportBtn && sitiosFile){
+  sitiosImportBtn.addEventListener('click', () => sitiosFile.click());
+  sitiosFile.addEventListener('change', async () => {
+    const f = sitiosFile.files && sitiosFile.files[0];
+    sitiosFile.value = '';
+    if(!f) return;
+    let datos;
+    try { datos = JSON.parse(await f.text()); }
+    catch(e){ sitiosIOMsg('Ese archivo no es un respaldo válido.', 'var(--red-text)'); return; }
+    const lista = Array.isArray(datos) ? datos : (datos && datos.sitios);
+    if(!Array.isArray(lista)){ sitiosIOMsg('Ese archivo no es un respaldo del Climómetro.', 'var(--red-text)'); return; }
+    // Validar cada sitio: un archivo editado a mano no debe meter basura al
+    // mapa ni coordenadas fuera del planeta.
+    const limpios = lista.map(x => ({
+      name: String((x && x.name) || '').trim().slice(0, 60),
+      lat: Number(x && x.lat), lng: Number(x && x.lng)
+    })).filter(x => x.name && isFinite(x.lat) && isFinite(x.lng)
+      && x.lat >= -90 && x.lat <= 90 && x.lng >= -180 && x.lng <= 180);
+    if(!limpios.length){ sitiosIOMsg('El respaldo no trae sitios utilizables.', 'var(--red-text)'); return; }
+    // Fusionar, no reemplazar: restaurar no debe borrar lo que ya se capturó.
+    const clave = x => x.name.toLowerCase() + '|' + x.lat.toFixed(4) + '|' + x.lng.toFixed(4);
+    const vistos = new Set(sites.map(clave));
+    const nuevos = limpios.filter(x => !vistos.has(clave(x)));
+    const tope = Math.max(0, 30 - sites.length);
+    const agregados = nuevos.slice(0, tope);
+    sites = sites.concat(agregados);
+    saveSites();
+    // Mismo camino que al borrar un sitio: recargar pronóstico y repintar.
+    siteWeatherFor = '';
+    loadSiteWeather().then(() => { renderSitesPanel(); refreshSitesLayer(); renderAll(); });
+    ensureHistData('histflood').then(() => renderSitesPanel());
+    ensureHistData('histtracks').then(() => renderSitesPanel());
+    sitiosIOMsg(agregados.length
+      ? 'Restaurados ' + agregados.length + ' sitio' + (agregados.length>1?'s':'')
+        + (nuevos.length > agregados.length ? ' (tope de 30 alcanzado)' : '')
+        + (limpios.length > nuevos.length ? ' · ' + (limpios.length - nuevos.length) + ' ya estaban' : '')
+      : 'Todos los sitios del respaldo ya estaban cargados.',
+      agregados.length ? '#7fdca4' : 'var(--text-dim)');
+    track('sitios_restaurados', { n: agregados.length });
+  });
+}
+
 // ── ALERTAS POR WHATSAPP (suscripción) ──────────────────────────────────
 // El registro viaja a /api/suscribir (Vercel Function) que lo reenvía a la
 // central de alertamiento; la configuración vive también en localStorage
 // para mostrar el estado y poder modificarla.
-// El protocolo define QUÉ llega (cortes 07:00/16:00 + fichas naranja/roja);
+// El protocolo define QUÉ llega (cortes 09:00/14:00/16:00 + fichas naranja/roja);
 // el usuario solo dice quién es, su número y qué regiones le tocan.
 const ALERTAS_KEY = 'climometro_alertas_v2';
 const REGIONES_ALERTA = ['Norte', 'Occidente', 'Centro', 'Sureste'];
@@ -3521,19 +3858,56 @@ function renderAlertas(){
   const el = document.getElementById('alertas-body');
   if(!el) return;
   if(alertasCfg){
+    // Tres estados distintos, no un booleano: "el servidor contestó" no es lo
+    // mismo que "quedaste dado de alta". Decir lo segundo cuando solo pasó lo
+    // primero es la clase de promesa que el cliente descubre el día que
+    // esperaba una alerta y no llegó.
+    let est = alertasCfg.estado || (alertasCfg.entregado ? 'central' : 'local');
+    if(est !== 'central' && est !== 'portal') est = 'local';
+    const EST = {
+      central: { c:'#7fdca4', b:'rgba(62,207,110,0.4)', f:'rgba(62,207,110,0.08)',
+        t:'● Alta confirmada',
+        d:'Estás en la lista de la central de alertamiento. Te avisamos por este mismo número en cuanto arranque el servicio.' },
+      portal:  { c:'var(--aleph-yellow)', b:'rgba(228,194,73,0.45)', f:'rgba(228,194,73,0.08)',
+        t:'● Anotado, sin central conectada',
+        d:'Recibimos tus datos, pero el motor de envío todavía no está conectado: tu alta aún no viaja a ningún sistema. Escríbenos a hola@alephri.com para confirmarla.' },
+      local:   { c:'var(--red-text)', b:'rgba(224,48,32,0.45)', f:'rgba(224,48,32,0.08)',
+        t:'● Guardado solo en este equipo',
+        d:'No pudimos registrarlo con nosotros. Vuelve a intentarlo o escríbenos a hola@alephri.com para darte de alta.' }
+    }[est];
     el.innerHTML =
-      '<div style="padding:10px 12px;border:1px solid rgba(62,207,110,0.4);background:rgba(62,207,110,0.08);border-radius:6px;font-size:12px;line-height:1.6">'
-      + '<b style="color:#7fdca4">● Alertas activas</b> para <b>'+escHTML(alertasCfg.telefono)+'</b>'
-      + (alertasCfg.entregado ? '' : ' <span style="color:var(--text-dim)">(registro local — se sincroniza con la central)</span>')
+      '<div style="padding:10px 12px;border:1px solid '+EST.b+';background:'+EST.f+';border-radius:6px;font-size:12px;line-height:1.6">'
+      + '<b style="color:'+EST.c+'">'+EST.t+'</b>'
+      + ' para <b>'+escHTML(alertasCfg.telefono)+'</b>'
       + '<br><span style="color:rgba(255,255,255,0.7)">Regiones: '+alertasCfg.regiones.map(escHTML).join(', ')+'</span>'
-      + '<br><span style="color:var(--text-dim)">Recibirás los cortes de 09:00, 14:00 y 16:00, y fichas inmediatas solo en naranja o rojo.</span>'
-      + '</div>'
+      + '<br><span style="color:var(--text-dim)">'+EST.d+'</span></div>'
       + '<div style="display:flex;gap:8px;margin-top:8px">'
       + '<button type="button" id="alertas-edit" class="cl-toggle" style="flex:1;padding:6px">Modificar</button>'
-      + '<button type="button" id="alertas-off" class="cl-toggle" style="flex:1;padding:6px;color:var(--red-text)">Desactivar</button>'
-      + '</div>';
+      + '<button type="button" id="alertas-off" class="cl-toggle" style="flex:1;padding:6px;color:var(--red-text)">'
+      + (est === 'central' ? 'Darme de baja' : 'Borrar de este equipo') + '</button>'
+      + '<\/div><div id="alertas-msg" style="font-size:10.5px;color:var(--text-dim);margin-top:6px;line-height:1.4"><\/div>';
     document.getElementById('alertas-edit').onclick = () => { const prev = alertasCfg; alertasCfg = null; renderAlertas(prev); };
-    document.getElementById('alertas-off').onclick = () => {
+    document.getElementById('alertas-off').onclick = async () => {
+      const msg = document.getElementById('alertas-msg');
+      // Si la central tiene el número, borrar el localStorage no da de baja a
+      // nadie: los mensajes seguirían llegando. Hay que pedirle la baja.
+      if(est === 'central'){
+        msg.textContent = 'Dando de baja…';
+        try {
+          const r = await fetch('/api/suscribir', { method:'POST', headers:{'content-type':'application/json'},
+            body: JSON.stringify({ accion:'baja', telefono: alertasCfg.telefono, nombre: alertasCfg.nombre, regiones: alertasCfg.regiones }) });
+          const j = await r.json().catch(() => null);
+          if(!r.ok || !j || !j.entregado){
+            msg.innerHTML = 'No pudimos confirmar la baja en la central. Escríbenos a <b>hola@alephri.com<\/b> para asegurarla.';
+            msg.style.color = 'var(--aleph-yellow)';
+            return;
+          }
+        } catch(e){
+          msg.innerHTML = 'Sin conexión: no pudimos dar la baja. Intenta de nuevo o escríbenos a <b>hola@alephri.com<\/b>.';
+          msg.style.color = 'var(--red-text)';
+          return;
+        }
+      }
       alertasCfg = null;
       try { localStorage.removeItem(ALERTAS_KEY); } catch(e){}
       renderAlertas();
@@ -3543,7 +3917,10 @@ function renderAlertas(){
   const prev = arguments[0] || null;
   const marcadas = prev ? prev.regiones : REGIONES_ALERTA.slice();
   el.innerHTML =
-    '<div style="font-size:11px;color:rgba(255,255,255,0.6);line-height:1.5;margin-bottom:8px">Tres cortes al día (09:00, 14:00 y 16:00) con la situación de tus regiones, y ficha inmediata solo cuando algo cruza a <b style="color:#ff9530">naranja</b> o <b style="color:var(--red-text)">rojo</b>. Con alerta activa la cadencia sube.</div>'
+    '<div style="font-size:11px;color:rgba(255,255,255,0.6);line-height:1.5;margin-bottom:8px">'
+    + 'El servicio de alertamiento <b style="color:var(--aleph-yellow)">todavía no está en operación</b>. Déjanos tus datos y te damos de alta en cuanto arranque: '
+    + 'tres cortes al día (09:00, 14:00 y 16:00) y ficha inmediata solo en <b style="color:#ff9530">naranja</b> o <b style="color:var(--red-text)">rojo</b>. '
+    + 'Mientras tanto puedes descargar la ficha PDF del día desde el Resumen.</div>'
     + '<input id="alertas-nombre" type="text" placeholder="Tu nombre" value="'+(prev ? escHTML(prev.nombre || '') : '')+'" '
     + 'style="width:100%;padding:9px 11px;background:var(--bg-input);border:1px solid var(--border-strong);border-radius:6px;color:#fff;font-family:\'Inter\',sans-serif;font-size:13px;margin-bottom:6px" aria-label="Nombre">'
     + '<input id="alertas-tel" type="tel" inputmode="tel" placeholder="Número WhatsApp · 10 dígitos (MX) o +…" value="'+(prev ? escHTML(prev.telefono) : '')+'" '
@@ -3553,7 +3930,7 @@ function renderAlertas(){
         '<div class="cbox'+(marcadas.includes(r) ? ' on' : '')+'" data-region="'+r+'" role="button" tabindex="0" style="padding:5px 0">'
         + '<div class="cbox-square"></div><div class="cbox-label">'+r+'</div></div>'
       ).join('')
-    + '<button type="button" id="alertas-go" class="site-add-btn" style="margin-top:10px;border-style:solid">Activar alertas</button>'
+    + '<button type="button" id="alertas-go" class="site-add-btn" style="margin-top:10px;border-style:solid">Apuntarme a la lista</button>'
     + '<div id="alertas-msg" style="font-size:10.5px;color:var(--text-dim);margin-top:6px;line-height:1.4"></div>';
   el.querySelectorAll('[data-region]').forEach(c => c.addEventListener('click', () => c.classList.toggle('on')));
   document.getElementById('alertas-go').onclick = async () => {
@@ -3570,15 +3947,22 @@ function renderAlertas(){
       const r = await fetch('/api/suscribir', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(payload) });
       resp = await r.json();
       if(!r.ok){ msg.textContent = resp.error || 'No se pudo registrar. Intenta de nuevo.'; msg.style.color = 'var(--red-text)'; return; }
-    } catch(e){ /* sin red o preview local: guardamos local y sincroniza después */ }
+    } catch(e){
+      msg.innerHTML = 'Sin conexión con el servidor: tus datos quedaron <b>solo en este equipo</b>. Intenta de nuevo más tarde.';
+      msg.style.color = 'var(--aleph-yellow)';
+    }
     alertasCfg = {
       telefono: (resp && resp.telefono) || (tel.startsWith('+') ? tel : '+52' + tel.replace(/\D/g,'')),
       nombre,
       regiones,
-      entregado: !!(resp && resp.ok),
+      // resp.ok solo dice que el endpoint respondió; resp.entregado dice si la
+      // central lo tomó. Son cosas distintas y el usuario merece saber cuál.
+      estado: !resp ? 'local' : (resp.entregado ? 'central' : 'portal'),
+      entregado: !!(resp && resp.entregado),
       ts: Date.now()
     };
     try { localStorage.setItem(ALERTAS_KEY, JSON.stringify(alertasCfg)); } catch(e){}
+    track('alerta_registro', { estado: alertasCfg.estado, regiones: regiones.length });
     renderAlertas();
   };
 }
@@ -3743,6 +4127,14 @@ async function generarFichaPDF(){
     });
   }
 
+  // Cuántos riesgos activos habrá: se reserva su espacio antes de listar zonas,
+  // para que la ficha no desborde a una segunda página casi vacía.
+  const riesgosPrevios = (riskFeeds.storms || []).filter(stormNearMexico).length
+    + ZONAS.filter(z => z._floodRatio).slice(0, 4).length
+    + ((riskFeeds.quakes && riskFeeds.quakes.features) ? riskFeeds.quakes.features.filter(f => (f.properties.mag||0) >= 5).slice(0, 3).length : 0)
+    + (sitiosEnGeocerca().length ? 1 : 0)
+    + (fuentesCaidas().length ? 1 : 0);
+
   // ── Zonas que exigen atención ──────────────────────────────────────────
   const zonasAtn = ZONAS.map(z => ({ z, n: nivelDeZona(z) })).filter(x => x.n >= 2)
     .sort((a,b) => b.n - a.n);
@@ -3754,7 +4146,7 @@ async function generarFichaPDF(){
   } else {
     // Cuántas zonas caben sin empujar corredores y riesgos a una segunda
     // página casi vacía: la ficha debe ser un documento de una hoja.
-    const reserva = 48;
+    const reserva = 52 + Math.min(4, riesgosPrevios) * 5.2;
     caben = Math.max(4, Math.floor((PDF_H - 20 - reserva - y) / 6.4));
     zonasAtn.slice(0, caben).forEach(({z, n}) => {
       asegurar(8);
@@ -3815,7 +4207,7 @@ async function generarFichaPDF(){
     + enGeo.map(x => x.sitio.name).join(', ') + ' → suspender actividad en calle en esas áreas.');
   if(riesgos.length){
     titulo('Riesgos activos');
-    riesgos.forEach(r => {
+    riesgos.slice(0, 8).forEach(r => {
       asegurar(7);
       doc.splitTextToSize('• ' + r, PDF_CW).slice(0, 2).forEach((ln, i) => {
         txt(ln, PDF_M + (i ? 3 : 0), y, { size:8, color:'#3a3630' });
@@ -3830,6 +4222,12 @@ async function generarFichaPDF(){
   for(let p = 1; p <= paginas; p++){
     doc.setPage(p);
     regla(PDF_H - 16);
+    const caidasPDF = fuentesCaidas();
+    if(caidasPDF.length){
+      caja(PDF_M, PDF_H - 21.5, PDF_CW, 6.2, '#fdece9', '#c81f10', 0.8);
+      txt('⚠ Fuentes no disponibles al generar esta ficha: ' + caidasPDF.map(f => f.nombre).join(', ')
+          + '. La evaluación puede estar incompleta.', PDF_M + 2.5, PDF_H - 17.4, { size:6.8, bold:true, color:'#c81f10' });
+    }
     txt('Fuentes: Open-Meteo (ECMWF/GFS/ICON) · NHC/NOAA · USGS · GloFAS/Copernicus · CONAGUA · CENAPRED.',
         PDF_M, PDF_H - 12, { size:6.5, color:'#8a8578' });
     txt('Los niveles SIAT-CT son estimaciones de apoyo de Aleph; la declaratoria oficial corresponde a Protección Civil.',
@@ -3887,6 +4285,8 @@ function buildParteOperativo(){
     lines.push('≋ ' + z.zm + ' — crecida fluvial ' + z._floodRatio.toFixed(1) + '× la mediana mensual (GloFAS)'));
   if(lines.length === 1) lines.push('🟢 Sin afectaciones relevantes previstas a nivel nacional.');
   lines.push('');
+  const caidasTxt = fuentesCaidas();
+  if(caidasTxt.length) lines.push('⚠ Fuentes no disponibles: ' + caidasTxt.map(f => f.nombre).join(', ') + ' — evaluación incompleta.');
   lines.push('Fuentes: Open-Meteo · NHC/NOAA · USGS · GloFAS. Generado ' + new Date().toLocaleString('es-MX', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' }) + '.');
   return lines.join('\n');
 }
@@ -3909,8 +4309,10 @@ if(pdfBtn) pdfBtn.addEventListener('click', async () => {
   try {
     await generarFichaPDF();
     pdfBtn.textContent = '✓ Ficha descargada';
+    track('pdf_descargado', { nivel: nivelNacional() });
   } catch(e){
     console.warn('Ficha PDF falló:', e);
+    track('pdf_fallo');
     pdfBtn.textContent = 'No se pudo generar — reintenta';
   }
   setTimeout(() => { pdfBtn.textContent = original; pdfBtn.disabled = false; }, 2600);
@@ -3918,6 +4320,7 @@ if(pdfBtn) pdfBtn.addEventListener('click', async () => {
 
 const parteWaBtn = document.getElementById('parte-wa-btn');
 if(parteWaBtn) parteWaBtn.addEventListener('click', () => {
+  track('parte_whatsapp', { nivel: nivelNacional() });
   window.open('https://wa.me/?text=' + encodeURIComponent(buildParteOperativo()), '_blank', 'noopener');
 });
 
@@ -4015,7 +4418,7 @@ document.querySelectorAll('[data-tg]').forEach(t => {
     if(layer === 'histagua'){ refreshHistLayers(); return; }
     if(layer === 'geocercas'){ refreshGeocercas(); return; }
     if(layer === 'rain'){
-      if(layerVis.rain) ensureGrid();
+      if(layerVis.rain){ gridLoadStatus = 'iniciando…'; updateClimaFreshness(); ensureGrid(); }
       else if(mapReady) setLayerVis('rain-raster', false);
       updateLegendRows();
       return;
@@ -4024,15 +4427,6 @@ document.querySelectorAll('[data-tg]').forEach(t => {
   });
 });
 
-// Corridor type filter
-document.querySelectorAll('[data-corr-type]').forEach(cb => {
-  cb.addEventListener('click', () => {
-    const t = cb.dataset.corrType;
-    corrTypeVis[t] = !corrTypeVis[t];
-    cb.classList.toggle('on', corrTypeVis[t]);
-    if(map) refreshMap();
-  });
-});
 
 // Detail close
 document.getElementById('dc').addEventListener('click', () => {
@@ -4051,7 +4445,7 @@ function changeWeek(d){
   renderAll();
   if(sel) showDet(sel);
 }
-function jmpW(i){ wk = i; if(map) refreshMap(); renderAll(); if(sel) showDet(sel); }
+function jmpW(i){ wk = i; track('dia_cambiado', { dia: i }); if(map) refreshMap(); renderAll(); if(sel) showDet(sel); }
 
 // Expose for inline onclick
 window.changeWeek = changeWeek;
@@ -4118,7 +4512,7 @@ function zonasFC(){
       const lvl = (mode === 'clima') ? nivelDeZona(z) : (z.semanas[wk] || 0);
       return {
         type: 'Feature',
-        properties: { cve: z.cve, zm: z.zm, level: lvl },
+        properties: { cve: z.cve, zm: z.zm, level: lvl, sinDato: !!(mode === 'clima' && z.sinDato) },
         geometry: { type: 'Point', coordinates: [z.lng, z.lat] }
       };
     })
@@ -4231,7 +4625,7 @@ function showDet(z){
   const n = (mode === 'clima') ? nivelDeZona(z) : z.semanas[wk];
   const [lbl,col,bg] = lvlMeta(n);
   document.getElementById('dn').textContent = z.zm;
-  document.getElementById('ds').textContent = z.estado + ' · ' + z.n_mun + ' municipios';
+  document.getElementById('ds').textContent = z.estado + ' · ' + z.n_mun + (z.n_mun === 1 ? ' municipio' : ' municipios');
   const ne = document.getElementById('dniv');
   ne.textContent = lbl; ne.style.color = col; ne.style.background = bg;
   document.getElementById('dsa').textContent = z.alertas;
@@ -4370,7 +4764,13 @@ function renderAll(){
   // Banderas por región — EL semáforo, lo primero que se lee
   const regEl = document.getElementById('hl-regiones');
   if(regEl){
-    if(isClima){
+    if(isClima && climaSinDatos){
+      regEl.innerHTML = '<div class="reg-flags">' + REGIONES_OPS.map(r =>
+        '<div class="reg-flag" style="border-color:rgba(255,255,255,0.18);background:rgba(255,255,255,0.04)">'
+        + '<div class="rf-name" style="color:var(--text-dim)">'+r+'</div>'
+        + '<div class="rf-lvl" style="color:var(--text-dim)">—</div>'
+        + '<div class="rf-verb">sin dato</div></div>').join('') + '</div>';
+    } else if(isClima){
       const niveles = banderasPorRegion();
       regEl.innerHTML = '<div class="reg-flags">' + REGIONES_OPS.map(r => {
         const m = NIVELES[niveles[r]];
@@ -4392,7 +4792,12 @@ function renderAll(){
   // primero que se ve, sin abrir ningún panel.
   const fhReg = document.getElementById('fh-regiones');
   if(fhReg){
-    if(isClima){
+    if(isClima && climaSinDatos){
+      fhReg.innerHTML = '<div class="fh-flags">' + REGIONES_OPS.map(r =>
+        '<div class="fh-flag" style="border-color:rgba(255,255,255,0.18);background:rgba(255,255,255,0.05)">'
+        + '<b style="color:var(--text-dim)">'+r.slice(0,3).toUpperCase()+'</b>'
+        + '<span style="color:var(--text-dim)">sin dato</span></div>').join('') + '</div>';
+    } else if(isClima){
       const niveles = banderasPorRegion();
       fhReg.innerHTML = '<div class="fh-flags">' + REGIONES_OPS.map(r => {
         const m = NIVELES[niveles[r]];
@@ -4462,6 +4867,7 @@ function renderAll(){
     changesEl.innerHTML = rows.join('');
   }
 
+  renderAvisoFuentes();
   renderEstadoCorte();
   renderZMList();
   renderCorridors();
@@ -4617,7 +5023,11 @@ function renderCorridors(){
   if(mode === 'clima'){
     // Corredores rankeados por su propio pronóstico (peor punto de la ruta).
     if(!corridorClimaLevels){
-      el.innerHTML = '<div style="padding:16px;font-size:12px;color:var(--text-dim);font-style:italic;text-align:center;">Cargando pronóstico de corredores…</div>';
+      const fallo = FUENTES.corredores.ok === false;
+      el.innerHTML = '<div style="padding:16px;font-size:12px;color:'+(fallo?'var(--red-text)':'var(--text-dim)')+';font-style:italic;text-align:center;">'
+        + (fallo ? '⚠ No pudimos consultar el pronóstico de corredores. Reintenta desde el aviso superior.'
+                 : 'Cargando pronóstico de corredores…')
+        + '</div>';
       return;
     }
     const todos = CORRIDORS.map((c, ci) => ({
@@ -4997,7 +5407,8 @@ try {
       layout: { visibility: 'none' },
       paint: {
         'circle-radius': 9,
-        'circle-color': ['match', ['get','level'], 4, NIVELES[4].mapa, 3, NIVELES[3].mapa, 2, NIVELES[2].mapa, 1, NIVELES[1].mapa, NIVELES[0].mapa],
+        'circle-color': ['case', ['get','sinDato'], '#8a8578',
+          ['match', ['get','level'], 4, NIVELES[4].mapa, 3, NIVELES[3].mapa, 2, NIVELES[2].mapa, 1, NIVELES[1].mapa, NIVELES[0].mapa]],
         'circle-stroke-color': '#0a0a0a',
         'circle-stroke-width': 2.2,
         'circle-opacity': 0.95
@@ -5104,6 +5515,16 @@ try {
     });
     map.on('mouseleave', 'quakes-circle', hoverOut);
 
+    // Etiquetas del basemap en español: el portal es en español y salían
+    // "Mexico City", "Gulf of Mexico".
+    try {
+      map.getStyle().layers.forEach(l => {
+        if(l.type === 'symbol' && l.layout && l.layout['text-field'] && l.id.indexOf('zonas') !== 0
+           && l.id.indexOf('hurr') !== 0 && l.id.indexOf('quakes') !== 0 && l.id.indexOf('sites') !== 0){
+          map.setLayoutProperty(l.id, 'text-field', ['coalesce', ['get','name_es'], ['get','name']]);
+        }
+      });
+    } catch(e){ /* estilo sin name_es: se queda como viene */ }
     mapReady = true;
     encuadrarPais(false);
     refreshMap();
@@ -5142,4 +5563,4 @@ try {
 }
 </script>
 </body>
-</html><!-- Build: Fri May 15 15:45:00 CST 2026 · clima grid: two-pass refill for guaranteed coverage -->
+</html>

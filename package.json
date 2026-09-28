@@ -1,0 +1,7 @@
+{
+  "name": "climometro",
+  "private": true,
+  "type": "module",
+  "description": "Climómetro MX — portal estático. No hay build: package.json existe solo para que las funciones de /api y la middleware se resuelvan como ESM.",
+  "engines": { "node": ">=20" }
+}
