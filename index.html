@@ -385,7 +385,9 @@ html,body{height:100%;width:100%;overflow:hidden;font-family:'Inter',sans-serif;
 
 /* AVISO DE FUENTES CAÍDAS — un producto de alertas debe decir cuándo está ciego */
 .aviso-fuentes{
-  position:absolute;top:10px;left:50%;transform:translateX(-50%);
+  /* Debajo del header (54 px), no detrás: con top:10px y z-index menor que
+     el del header, el aviso más importante del producto quedaba ilegible. */
+  position:absolute;top:64px;left:50%;transform:translateX(-50%);
   max-width:min(680px,calc(100vw - 24px));z-index:1200;
   display:flex;align-items:center;gap:10px;
   padding:9px 12px;border-radius:7px;
@@ -4826,10 +4828,15 @@ function renderAll(){
     // Chips de día: la tira ES el resumen de la semana (peor nivel + nº de zonas).
     const DOW = ['DOM','LUN','MAR','MIÉ','JUE','VIE','SÁB'];
     const chips = SEMANAS.map((s, i) => {
-      const c = counts[i];
-      const col = nivelColor(topeDia[i]);
+      // Sin pronóstico el conteo solo tendría las zonas que marcó el ciclón, y
+      // presentarlo como "zonas en alerta del día" afirmaría que el resto está
+      // bien — exactamente lo que no sabemos. Un guion, como las banderas.
+      const c = climaSinDatos ? 0 : counts[i];
+      const col = climaSinDatos ? NIVELES[0].dim : nivelColor(topeDia[i]);
       const lbl = i === 0 ? 'HOY' : (i === 1 ? 'MAÑ' : DOW[new Date(s+'T12:00:00').getDay()]);
-      const title = fmtD(s) + ' · ' + c + (c === 1 ? ' zona en amarillo o peor' : ' zonas en amarillo o peor');
+      const title = climaSinDatos
+        ? fmtD(s) + ' · sin datos de pronóstico'
+        : fmtD(s) + ' · ' + c + (c === 1 ? ' zona en amarillo o peor' : ' zonas en amarillo o peor');
       return '<div class="day-chip'+(i===wk?' on':'')+'" onclick="jmpW('+i+')" role="button" tabindex="0"'
         + (i===wk?' aria-current="true"':'') + ' title="'+title+'">'
         + '<span class="dc-day">'+lbl+'</span>'
