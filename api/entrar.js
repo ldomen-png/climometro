@@ -1,17 +1,23 @@
 // Canje del código de acceso por una sesión firmada.
 import { COOKIE, DIAS_SESION, firmar, catalogoCodigos } from '../lib/sesion.js';
 
-// Mismo rate limit best-effort que /api/suscribir: sin él, el código de
-// acceso se puede adivinar por fuerza bruta desde una sola máquina.
-const VENTANA_MS = 60_000, MAX = 8;
-const golpes = new Map();
-function limitado(ip) {
+// Rate limit best-effort contra fuerza bruta. Cuenta SOLO los fallos: una
+// oficina entera sale por la misma IP y si los aciertos sumaran, el primer
+// lunes en que veinte personas entran a la vez se bloquearían entre ellas.
+const VENTANA_MS = 60_000, MAX_FALLOS = 8;
+const fallos = new Map();
+function recientes(ip) {
   const ahora = Date.now();
-  const prev = (golpes.get(ip) || []).filter(t => ahora - t < VENTANA_MS);
-  prev.push(ahora);
-  golpes.set(ip, prev);
-  if (golpes.size > 5000) golpes.clear();
-  return prev.length > MAX;
+  const prev = (fallos.get(ip) || []).filter(t => ahora - t < VENTANA_MS);
+  if (prev.length) fallos.set(ip, prev); else fallos.delete(ip);
+  return prev;
+}
+function bloqueado(ip) { return recientes(ip).length >= MAX_FALLOS; }
+function anotarFallo(ip) {
+  const prev = recientes(ip);
+  prev.push(Date.now());
+  fallos.set(ip, prev);
+  if (fallos.size > 5000) fallos.clear(); // techo de memoria
 }
 
 export default async function handler(req, res) {
@@ -29,9 +35,9 @@ export default async function handler(req, res) {
     return res.status(500).json({ ok: false, error: 'Acceso mal configurado. Avísanos.' });
   }
   const ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || 'desconocida';
-  if (limitado(ip)) {
+  if (bloqueado(ip)) {
     res.setHeader('Retry-After', '60');
-    return res.status(429).json({ ok: false, error: 'Demasiados intentos. Espera un minuto.' });
+    return res.status(429).json({ ok: false, error: 'Demasiados códigos incorrectos. Espera un minuto.' });
   }
 
   const codigo = String((req.body || {}).codigo || '').trim();
@@ -41,6 +47,7 @@ export default async function handler(req, res) {
     // atacante en paralelo se reparte entre varias. La defensa que no depende
     // del estado son códigos largos al azar (ver README) más este retardo, que
     // baja el techo de intentos por segundo aunque cada uno estrene instancia.
+    anotarFallo(ip);
     await new Promise(r => setTimeout(r, 700));
     // Nunca el código en el log; solo que hubo un fallo y desde dónde.
     console.log('acceso rechazado', ip);

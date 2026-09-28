@@ -16,7 +16,10 @@ const REGIONES = ['Norte', 'Occidente', 'Centro', 'Sureste'];
 // tienen contadores separados) pero evita que el endpoint quede abierto de par
 // en par. El límite duro real vive en la central cuando se conecte.
 const VENTANA_MS = 60_000;
-const MAX_POR_VENTANA = 5;
+// Aquí sí cuentan todas las peticiones, porque lo que se frena es el spam de
+// altas, no adivinar un secreto. Pero una oficina entera sale por una sola
+// IP, así que el techo deja espacio para varias personas en el mismo minuto.
+const MAX_POR_VENTANA = 12;
 const golpes = new Map();
 
 function limitado(ip) {
