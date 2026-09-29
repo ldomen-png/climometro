@@ -36,14 +36,14 @@ Umbrales centralizados en `CLIMA_THRESHOLDS` (tres tramos por variable) y escala
 
 | Fuente | Uso | Endpoint |
 |---|---|---|
-| Open-Meteo Forecast | Pronóstico ZMs, corredores y malla | `api.open-meteo.com/v1/forecast` |
-| Open-Meteo Flood (GloFAS) | Señal de crecida fluvial | `flood-api.open-meteo.com/v1/flood` |
+| Open-Meteo Forecast | Pronóstico ZMs, corredores y malla | vía `api/clima.js` → `api.open-meteo.com/v1/forecast` |
+| Open-Meteo Flood (GloFAS) | Señal de crecida fluvial | vía `api/clima.js` → `flood-api.open-meteo.com/v1/flood` |
 | NHC / NOAA | Ciclones tropicales (cono, track, puntos) | `mapservices.weather.noaa.gov/tropical/.../NHC_tropical_weather/MapServer` |
 | USGS | Sismos M4.5+ (48 h) | `earthquake.usgs.gov/fdsnws/event/1/query` |
 | CENAPRED (estático) | Peligro por inundación municipal | Atlas Nacional de Riesgos, capa 52 → `data/inundacion.json` |
 | NOAA HURDAT2 (estático) | Trayectorias históricas de ciclones | `nhc.noaa.gov/data/hurdat/` → `data/huracanes.json` |
 
-Las fuentes en vivo tienen CORS abierto — el cliente estático las consume sin backend ni API keys (salvo el token público de Mapbox). Las capas CENAPRED y HURDAT2 se pre-procesan offline (el ArcGIS del Atlas es demasiado lento para consultas en vivo) y viajan como GeoJSON estático del propio repo.
+NHC y USGS tienen CORS abierto y el cliente los consume directo; Open-Meteo pasa por el proxy (ver arriba). Las capas CENAPRED y HURDAT2 se pre-procesan offline (el ArcGIS del Atlas es demasiado lento para consultas en vivo) y viajan como GeoJSON estático del propio repo.
 
 ## Cuando una fuente falla
 
@@ -76,6 +76,7 @@ Drop-in en cualquier static host. Para Vercel: importar el repo y ya. No hay bui
 | `ACCESO_CODIGOS` | Puerta abierta: el portal es público |
 | `ACCESO_SECRETO` | Solo obligatoria si defines `ACCESO_CODIGOS` |
 | `SUSCRIPCIONES_WEBHOOK` | Los registros de alertas quedan en estado `portal` |
+| `OPEN_METEO_KEY` | El proxy usa el endpoint gratuito (no comercial, 10,000/día) |
 
 `middleware.js` y `api/*` corren en Vercel Functions; en otro static host el
 portal sigue funcionando pero sin puerta ni registro de alertas.
@@ -106,6 +107,47 @@ python3 motor/ejercicio.py --simulacro observado # + respuesta institucional (pi
 `corte.py` implementa el caso de uso del cliente: agrega por sus 4 regiones (`motor/regiones.json`), corre la máquina de estados NORMAL → SEGUIMIENTO → ALERTA → CIERRE y emite el mensaje de WhatsApp según las plantillas canónicas de `motor/PLANTILLAS.md` — tres cortes al día en condición normal (09:00, 14:00, 16:00), escalera de cadencia con alerta activa, ficha extraordinaria solo al cruzar a naranja/rojo, cierre explícito, y el silencio está prohibido. La memoria de estado y la bitácora de modo sombra viven en `motor/out/`.
 
 Reglas de fusión: la peor señal creíble manda; lluvia sobre terreno vulnerable (puntos críticos CONAGUA / CENAPRED alto) escala un nivel; la respuesta institucional observada solo escala, nunca des-escala. Señales: física (Open-Meteo), ciclón (SIAT-CT estimado desde NHC), hidrología (GloFAS), observado (`motor/observados.json`, después Sonar). Salidas en `motor/out/` (evidencia completa + `sombra.jsonl` para medir precisión y anticipación). Solo stdlib de Python.
+
+## Proxy de clima y cuota de Open-Meteo
+
+Todas las consultas meteorológicas pasan por **`api/clima.js`**, nunca directo
+desde el navegador. La razón es aritmética: una carga de página son solo 2
+peticiones HTTP pero **275 ubicaciones** (79 zonas + 196 waypoints de
+corredores), y Open-Meteo cobra por ubicación — con eso ~35 cargas agotan las
+10,000 diarias del plan gratuito, y el consumo se multiplicaba por cada persona
+y cada recarga.
+
+El proxy responde con `Cache-Control: s-maxage`, así que **el CDN de Vercel
+guarda la respuesta y la sirve a todos**: Open-Meteo se consulta una vez por
+ventana, no una vez por usuario. El costo deja de depender de cuánta gente
+entre.
+
+| Fuente | TTL en el edge | Por qué |
+|---|---|---|
+| `forecast` | 30 min | Coincide con la revalidación del portal |
+| `malla` | 3 h | La malla ya se cachea por día en el navegador |
+| `flood` | 6 h | GloFAS publica una vez al día |
+
+Resultado: ~198,000 ubicaciones/mes con refresco horario, **sin importar si son
+diez usuarios o mil**.
+
+El proxy valida todo antes de salir a la red — lista blanca de variables, área
+de interés (México y su entorno), máximo 300 puntos por llamada — porque con la
+llave del plan comercial dentro sería un relay abierto. Las coordenadas se
+redondean a 2 decimales (~1.1 km, irrelevante a estos umbrales) para que la URL
+sea idéntica entre recargas y el CDN acierte. Los errores del upstream se pasan
+tal cual **sin cachear**: si Open-Meteo devuelve 429, el portal debe entrar en
+su estado honesto de "sin pronóstico", no congelar el error media hora.
+
+**Plan comercial**: con `OPEN_METEO_KEY` definida el proxy usa
+`customer-api.open-meteo.com` (licencia de uso comercial + 1M llamadas/mes,
+$29/mes); sin ella cae al endpoint gratuito. El portal funciona en ambos casos,
+pero el gratuito es CC-BY-NC — **compartir el portal con clientes de paga
+requiere el plan**.
+
+```bash
+vercel env add OPEN_METEO_KEY production
+```
 
 ## Acceso por código y analíticos
 

@@ -1551,6 +1551,23 @@ const FUENTES = {
   crecidas:   { nombre:'Crecidas (GloFAS)', ok:null, critica:false },
   sitios:     { nombre:'Pronóstico de tus sitios', ok:null, critica:false }
 };
+// Todas las consultas de clima pasan por /api/clima, que las cachea en el edge
+// de Vercel: una sola llamada a Open-Meteo sirve a todos los usuarios durante
+// su ventana. Antes cada navegador pedía 275 ubicaciones por carga y la cuota
+// se multiplicaba por persona. El proxy también guarda la llave del plan
+// comercial, que en un HTML estático quedaría a la vista.
+function urlClima(fuente, puntos, vars, opts){
+  const o = opts || {};
+  // 2 decimales (~1.1 km) para que la URL sea idéntica entre recargas y el CDN
+  // acierte; a estos umbrales la diferencia es irrelevante.
+  const pts = puntos.map(p => (Math.round(p[0]*100)/100) + ',' + (Math.round(p[1]*100)/100)).join(';');
+  let u = '/api/clima?fuente=' + fuente
+    + '&pts=' + encodeURIComponent(pts)
+    + '&vars=' + encodeURIComponent(vars)
+    + '&dias=' + (o.dias || 7);
+  if(o.pasados) u += '&pasados=' + o.pasados;
+  return u;
+}
 function marcarFuente(id, ok){
   if(FUENTES[id]) FUENTES[id].ok = ok;
   // Una fuente caída es tan interesante para nosotros como para el usuario:
@@ -1739,11 +1756,8 @@ async function loadGridWeather(onProgress){
   const batches = [];
   for(let i = 0; i < grid.length; i += BATCH) batches.push(grid.slice(i, i + BATCH));
   const fetchBatch = async (pts) => {
-    const lats = pts.map(p => p.lat).join(',');
-    const lngs = pts.map(p => p.lng).join(',');
-    const url = 'https://api.open-meteo.com/v1/forecast?latitude='+lats+'&longitude='+lngs
-      +'&daily=precipitation_sum,wind_speed_10m_max,wind_direction_10m_dominant'
-      +'&timezone=America%2FMexico_City&forecast_days=7';
+    const url = urlClima('malla', pts.map(p => [p.lat, p.lng]),
+      'precipitation_sum,wind_speed_10m_max,wind_direction_10m_dominant');
     const r = await fetch(url);
     if(!r.ok) throw new Error('Open-Meteo '+r.status+' for '+pts.length+' pts');
     const d = await r.json();
@@ -1940,11 +1954,8 @@ function recomputeZMStats(){
 function loadWeather(){
   if(weatherData) return Promise.resolve(weatherData);
   if(weatherInflight) return weatherInflight;
-  const lats = ZONAS.map(z => z.lat).join(',');
-  const lngs = ZONAS.map(z => z.lng).join(',');
-  const url = 'https://api.open-meteo.com/v1/forecast?latitude='+lats+'&longitude='+lngs
-    +'&daily=precipitation_sum,precipitation_probability_max,wind_speed_10m_max,wind_gusts_10m_max,temperature_2m_max,weather_code'
-    +'&timezone=America%2FMexico_City&forecast_days=7';
+  const url = urlClima('forecast', ZONAS.map(z => [z.lat, z.lng]),
+    'precipitation_sum,precipitation_probability_max,wind_speed_10m_max,wind_gusts_10m_max,temperature_2m_max,weather_code');
   weatherInflight = fetch(url).then(r => {
     if(!r.ok) throw new Error('Open-Meteo '+r.status);
     return r.json();
@@ -1967,11 +1978,8 @@ function loadCorridorWeather(){
   // Flatten waypoints, remembering which (corridor, point) each one is
   const wpFlat = [];
   CORRIDORS.forEach((c, ci) => c.wp.forEach((p, pi) => wpFlat.push({ci, pi, lat:p[0], lng:p[1]})));
-  const lats = wpFlat.map(w => w.lat).join(',');
-  const lngs = wpFlat.map(w => w.lng).join(',');
-  const url = 'https://api.open-meteo.com/v1/forecast?latitude='+lats+'&longitude='+lngs
-    +'&daily=precipitation_sum,wind_speed_10m_max,wind_gusts_10m_max'
-    +'&timezone=America%2FMexico_City&forecast_days=7';
+  const url = urlClima('forecast', wpFlat.map(w => [w.lat, w.lng]),
+    'precipitation_sum,wind_speed_10m_max,wind_gusts_10m_max');
   corridorWeatherInflight = fetch(url).then(r=>r.json()).then(data => {
     const arr = Array.isArray(data) ? data : [data];
     corridorWeatherData = CORRIDORS.map(c => c.wp.map(() => null));
@@ -2341,10 +2349,8 @@ async function loadFlood(){
   // GloFAS (píxel ~5 km): señal de crecida = descarga máxima pronosticada vs
   // la mediana de los últimos 31 días en el mismo píxel. No entra al semáforo
   // (el píxel puede no caer sobre el río correcto) — es un aviso contextual.
-  const lats = ZONAS.map(z => z.lat).join(',');
-  const lngs = ZONAS.map(z => z.lng).join(',');
-  const url = 'https://flood-api.open-meteo.com/v1/flood?latitude='+lats+'&longitude='+lngs
-    +'&daily=river_discharge&past_days=31&forecast_days=7';
+  const url = urlClima('flood', ZONAS.map(z => [z.lat, z.lng]),
+    'river_discharge', { pasados: 31 });
   try {
     const r = await fetch(url);
     if(!r.ok) throw new Error('Flood API '+r.status);
@@ -2596,11 +2602,8 @@ async function loadSiteWeather(){
   if(!sites.length){ siteWeather = null; siteWeatherFor = ''; return null; }
   const key = sites.map(s => s.lat+','+s.lng).join(';');
   if(siteWeather && siteWeatherFor === key) return siteWeather;
-  const lats = sites.map(s => s.lat).join(',');
-  const lngs = sites.map(s => s.lng).join(',');
-  const url = 'https://api.open-meteo.com/v1/forecast?latitude='+lats+'&longitude='+lngs
-    +'&daily=precipitation_sum,precipitation_probability_max,wind_speed_10m_max,wind_gusts_10m_max,temperature_2m_max,weather_code'
-    +'&timezone=America%2FMexico_City&forecast_days=7';
+  const url = urlClima('forecast', sites.map(s => [s.lat, s.lng]),
+    'precipitation_sum,precipitation_probability_max,wind_speed_10m_max,wind_gusts_10m_max,temperature_2m_max,weather_code');
   // Reintentos con backoff: este fetch puede coincidir con los lotes de la
   // malla y toparse con el burst limit de Open-Meteo (429).
   for(let attempt = 0; attempt < 6; attempt++){
